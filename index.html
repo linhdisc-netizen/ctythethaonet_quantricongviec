@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Quản lý đơn hàng</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">📦 Đơn hàng TTS</div>
+  <nav id="tabs"></nav>
+  <div class="who">
+    <span id="sync" class="sync" title="Trạng thái đồng bộ"></span>
+    <span id="me" class="me"></span>
+    <button id="logout" class="btn sm" hidden>Đăng xuất</button>
+  </div>
+</header>
+<main id="main"></main>
+<div id="login" class="login" hidden>
+  <form id="login-form" autocomplete="off">
+    <h2>📦 Đơn hàng TTS</h2>
+    <p>Nhập mật khẩu được cấp cho vai trò của bạn.</p>
+    <input id="pw" type="password" placeholder="Mật khẩu" autocomplete="current-password" autofocus>
+    <div id="login-err" class="err"></div>
+    <button class="btn pri" type="submit">Đăng nhập</button>
+  </form>
+</div>
+<div id="modal" class="modal" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<script src="config.js"></script>
+<script src="parse.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
