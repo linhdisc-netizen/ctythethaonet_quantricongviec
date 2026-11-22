@@ -72,3 +72,16 @@ textarea{width:100%}
 .login .btn{width:100%;padding:10px}
 .err{color:var(--bad);min-height:20px;margin-bottom:6px;font-size:13px}
 .me{font-size:13px;color:var(--mut)}
+/* ---- đơn nhiều đôi / kiện ---- */
+.b-huy{background:var(--bg);color:var(--mut);border:1px solid var(--bd)}
+.ln{padding:1px 0;line-height:1.5}.ln.cancelled,.cancelled{text-decoration:line-through;color:var(--mut)}
+.nw{white-space:nowrap}
+.aline{display:grid;grid-template-columns:1.5fr .6fr 1fr 1fr .55fr auto;gap:6px;align-items:center;margin:6px 0}
+.aline select,.aline input{width:100%}
+.aline .sugg-line{grid-column:1/-1}
+#elines .aline{grid-template-columns:1.5fr .6fr 1fr 1fr auto auto}
+.kien .kh{margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ln.pk{display:flex;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid var(--bd);padding:6px 0}
+.ln.pk label{flex:1;cursor:pointer}
+details.card summary{cursor:pointer}
+@media(max-width:640px){.aline,#elines .aline{grid-template-columns:1fr 1fr}.aline .btn{justify-self:end}}

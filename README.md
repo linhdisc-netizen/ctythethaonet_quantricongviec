@@ -44,12 +44,19 @@ Sửa `config.js`: `window.APP_CONFIG = { api: 'URL-vừa-copy' };` rồi commit
 ### 4. Bật GitHub Pages
 Repo → **Settings → Pages**: *Source* = **Deploy from a branch**, *Branch* = **main** / **(root)** → Save.
 
+## Đơn nhiều đôi (kiện)
+- Mỗi dòng trong tab Đơn hàng là **một đôi**. Các dòng có **cùng Mã đơn** được app gom thành **một đơn** (kiện). Khi nhập tay trong Sheet, hãy ghi cùng mã ở mọi dòng, đừng gộp ô.
+- **Shop:** form Thêm đơn có nút **+ thêm đôi** và ô **số đôi** cho các đôi giống nhau. Có thể dán nhiều dòng cùng mã, thêm `x2` hoặc `2 đôi` cho số lượng. Nút **✎** để sửa đơn (mã, ngày, mẫu, size, màu, đóng kèm), hủy từng đôi hoặc hủy cả đơn, thêm đôi vào đơn có sẵn.
+- **Kho:** tab Cần đóng hiển thị theo kiện, ví dụ "3 đôi, kèm 2 bó gối", tick từng đôi khi nhặt hàng, rồi bấm **Đã đóng cả kiện**. Có nút **Hết hàng** cho từng đôi và bảng **Tổng hợp cần lấy hàng**.
+- Trạng thái của đơn lấy từ các đôi: đơn **Không có hàng** nếu có đôi hết hàng; **Đã hủy** khi hủy hết các đôi.
+- Sửa đơn chỉ Shop/Chủ làm được; đơn đã giao chỉ Chủ sửa được. Đổi mẫu của một đôi đang dùng hàng tồn thì đôi tồn tự trả lại kho.
+
 ## Cách app làm việc với Sheet
 - Sheet vẫn sửa tay bình thường được. App tự cập nhật sau tối đa 20 giây hoặc khi bấm "Tải lại".
 - Dòng bạn gõ tay vào cuối tab Đơn hàng (chưa có ID) sẽ được app tự cấp ID và điền mặc định (Chờ đóng, Mới) ở lần tải kế tiếp.
 - Mỗi thao tác kiểm tra trạng thái hiện tại: hai người cùng đổi một đơn thì người đến sau được báo "đơn vừa được người khác thay đổi" và dữ liệu được tải lại. Hai người cùng lấy một đôi tồn thì chỉ người đến trước được, người sau được tạo đơn như hàng mới.
 - Phân quyền kiểm tra ở backend, không chỉ ẩn nút: Shop không đổi sang "Đã đóng", Kho không thêm đơn, Shop không nhập kho.
-- Không xóa dòng nào trong Sheet của bạn. Muốn hủy đơn, đổi trạng thái thành "Không có hàng".
+- Không xóa dòng nào trong Sheet của bạn. Muốn hủy đơn, dùng nút Hủy trong app hoặc đổi trạng thái thành "Đã hủy".
 - Sheet càng nhiều dòng thì tải càng chậm; từ khoảng vài nghìn đơn nên sao lưu và chuyển đơn cũ sang một file khác.
 
 ## Bảo mật

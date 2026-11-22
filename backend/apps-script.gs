@@ -15,7 +15,7 @@ const SHEET_ID = '';   // ID của Google Sheet: đoạn giữa /d/ và /edit tr
 const TAB = { ORD: 'Đơn hàng', STK: 'Tồn kho', CMT: 'Bình luận', LOG: 'Nhật ký', CAT: 'Danh mục' };
 const ORD = { id: 'ID', date: 'Ngày', product: 'Sản phẩm', size: 'Size', color: 'Màu', code: 'Mã đơn', kem: 'Đóng kèm', src: 'Nguồn', st: 'Trạng thái', by: 'Người tạo', upd: 'Cập nhật lúc', note: 'Ghi chú' };
 const STK = { id: 'ID', date: 'Ngày nhập', type: 'Loại', product: 'Sản phẩm', size: 'Size', color: 'Màu', ref: 'Mã đơn hoàn', st: 'Tình trạng', used: 'Ngày dùng', forOrder: 'Dùng cho đơn (ID)', note: 'Ghi chú' };
-const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng'];
+const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng', 'Đã hủy'];
 const ROLE_NAME = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
 
 /* ---------- Điểm vào ---------- */
@@ -130,8 +130,20 @@ function readLog(name, max) {
   for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, 4).map(norm));
   return out;
 }
+// Sheet tạo từ file Excel bản đầu chưa có trạng thái "Đã hủy": tự bổ sung một lần, lỗi thì bỏ qua (không ảnh hưởng chạy).
+function ensureSetup(o) {
+  try {
+    const cat = book().getSheetByName(TAB.CAT);
+    if (!cat || !o.h[ORD.st]) return;
+    if (String(cat.getRange('E6').getValue()).trim() !== '') return;
+    cat.getRange('E6').setValue('Đã hủy');
+    const rule = SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).setAllowInvalid(false).build();
+    o.sh.getRange(2, o.h[ORD.st], 3000, 1).setDataValidation(rule);
+  } catch (err) { /* bỏ qua */ }
+}
 function load(role) {
   const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
+  ensureSetup(o);
   fillMissing(o, ORD, 'D', { 'Nguồn': 'Mới', 'Trạng thái': 'Chờ đóng', 'Người tạo': 'Nhập tay trong Sheet' });
   fillMissing(s, STK, 'T', { 'Tình trạng': 'Còn hàng' });
   const orders = [], stock = [];
@@ -207,11 +219,39 @@ function write(p, role) {
         if (STATUSES.indexOf(op.status) < 0) return results.push(fail('Trạng thái không hợp lệ'));
         const cur = String(cellOf(o, r, ORD.st));
         if (op.from && cur !== op.from) return results.push({ ok: false, conflict: true, current: cur });
-        if (role === 'shop' && op.status !== 'Đã giao' && op.status !== 'Chờ đóng') return results.push(fail('Shop không được đổi sang trạng thái này'));
-        if (op.status === 'Chờ đóng' && cur !== 'Không có hàng') freeStockOf(op.id);
+        if (role === 'shop' && ['Đã giao', 'Chờ đóng', 'Đã hủy'].indexOf(op.status) < 0) return results.push(fail('Shop không được đổi sang trạng thái này'));
+        if (role === 'kho' && op.status === 'Đã hủy') return results.push(fail('Kho không được hủy đơn'));
+        if (op.status === 'Đã hủy' && role !== 'chu' && cur !== 'Chờ đóng' && cur !== 'Không có hàng') return results.push(fail('Đơn đã đóng hoặc đã giao nên không hủy được. Nhờ Kho hoàn tác trước.'));
+        if ((op.status === 'Chờ đóng' && cur !== 'Không có hàng') || op.status === 'Đã hủy') freeStockOf(op.id);
         setCell(o, r, ORD.st, op.status); touch(r);
         log(op.id, cur + ' → ' + op.status);
         return results.push({ ok: true });
+      }
+      if (op.t === 'order.edit') {
+        if (role === 'kho') return results.push(fail('Vai trò Kho không được sửa đơn'));
+        const r = oIdx[op.id];
+        if (!r) return results.push(fail('Không thấy đơn ' + op.id));
+        const cur = String(cellOf(o, r, ORD.st));
+        if (cur === 'Đã giao' && role !== 'chu') return results.push(fail('Đơn đã giao, chỉ Chủ được sửa'));
+        const map = { date: ORD.date, product: ORD.product, size: ORD.size, color: ORD.color, code: ORD.code, kem: ORD.kem, note: ORD.note };
+        const F = op.fields || {}, changes = [];
+        let itemChanged = false;
+        Object.keys(F).forEach(k => {
+          if (!map[k]) return;
+          const old = norm(cellOf(o, r, map[k]));
+          const oldS = k === 'date' ? String(old).slice(0, 10) : String(old).trim();
+          const nv = String(F[k] === null || F[k] === undefined ? '' : F[k]).trim();
+          if (oldS === nv) return;
+          if (k === 'code') o.sh.getRange(r + 1, o.h[map[k]]).setNumberFormat('@');
+          setCell(o, r, map[k], k === 'date' ? (toDate(nv) || cellOf(o, r, map[k])) : k === 'size' ? (+nv || nv) : nv);
+          changes.push(map[k] + ': ' + (oldS || '(trống)') + ' → ' + (nv || '(trống)'));
+          if (k === 'product' || k === 'size' || k === 'color') itemChanged = true;
+        });
+        if (!changes.length) return results.push({ ok: true, changed: 0 });
+        const wasStock = String(cellOf(o, r, ORD.src)) === 'Hàng tồn';
+        if (itemChanged && wasStock) freeStockOf(op.id);       // đổi mẫu thì đôi tồn không còn khớp, trả lại kho
+        touch(r); log(op.id, 'Sửa: ' + changes.join('; '));
+        return results.push({ ok: true, changed: changes.length, stockFreed: itemChanged && wasStock });
       }
       if (op.t === 'stock.add') {
         if (role === 'shop') return results.push(fail('Shop không được nhập kho'));
