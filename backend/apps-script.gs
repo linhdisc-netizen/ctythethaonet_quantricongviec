@@ -130,15 +130,28 @@ function readLog(name, max) {
   for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, 4).map(norm));
   return out;
 }
-// Sheet tạo từ file Excel bản đầu chưa có trạng thái "Đã hủy": tự bổ sung một lần, lỗi thì bỏ qua (không ảnh hưởng chạy).
+// Sheet tạo từ file Excel bản đầu: (1) thiếu trạng thái "Đã hủy", (2) cột Sản phẩm chặn không cho gõ tên ngoài danh sách.
+// Hai việc này tự bổ sung một lần (có đánh dấu để không lặp lại); lỗi thì bỏ qua, không ảnh hưởng chạy.
 function ensureSetup(o) {
   try {
     const cat = book().getSheetByName(TAB.CAT);
-    if (!cat || !o.h[ORD.st]) return;
-    if (String(cat.getRange('E6').getValue()).trim() !== '') return;
-    cat.getRange('E6').setValue('Đã hủy');
-    const rule = SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).setAllowInvalid(false).build();
-    o.sh.getRange(2, o.h[ORD.st], 3000, 1).setDataValidation(rule);
+    if (cat && o.h[ORD.st] && String(cat.getRange('E6').getValue()).trim() === '') {
+      cat.getRange('E6').setValue('Đã hủy');
+      const rule = SpreadsheetApp.newDataValidation().requireValueInList(STATUSES, true).setAllowInvalid(false).build();
+      o.sh.getRange(2, o.h[ORD.st], 3000, 1).setDataValidation(rule);
+    }
+  } catch (err) { /* bỏ qua */ }
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const cat = book().getSheetByName(TAB.CAT);
+    if (cat && !props.getProperty('prodWarnOnly')) {
+      // vẫn có ô chọn danh sách, nhưng cho phép gõ tên sản phẩm khác (chỉ hiện cảnh báo nhỏ)
+      const rule = SpreadsheetApp.newDataValidation().requireValueInRange(cat.getRange('A2:A30'), true).setAllowInvalid(true).build();
+      if (o.h[ORD.product]) o.sh.getRange(2, o.h[ORD.product], 3000, 1).setDataValidation(rule);
+      const st = book().getSheetByName(TAB.STK);
+      if (st) { const ci = st.getRange(1, 1, 1, Math.max(st.getLastColumn(), 1)).getValues()[0].indexOf(STK.product); if (ci >= 0) st.getRange(2, ci + 1, 3000, 1).setDataValidation(rule); }
+      props.setProperty('prodWarnOnly', '1');
+    }
   } catch (err) { /* bỏ qua */ }
 }
 function load(role) {

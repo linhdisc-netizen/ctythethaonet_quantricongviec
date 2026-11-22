@@ -225,16 +225,23 @@ function vOrders() {
 
 /* ===== Thêm đơn (nhiều đôi) ===== */
 let ADD = null;
-const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, src: 'new', stockIds: [], autoPick: false, ...p });
+const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, src: 'new', stockIds: [], autoPick: false, custom: false, ...p });
+// Sản phẩm: chọn trong danh sách (chủ yếu) hoặc "Khác" để gõ tên tự do. a = tên thuộc tính data-k / data-e
+const isCustomProd = l => l.custom || (l.product && !PRODUCTS.includes(l.product));
+const prodHtml = (l, a) => { const c = isCustomProd(l); return `<select ${a}="productSel">${opts(PRODUCTS, c ? '' : l.product)}<option value="__other__" ${c ? 'selected' : ''}>Khác (gõ tên)…</option></select>`; };
+const prodOther = (l, a) => isCustomProd(l) ? `<input ${a}="product" class="wide" value="${esc(l.product)}" placeholder="Tên sản phẩm gõ tay (ví dụ: tất, bó gối, mẫu mới…)">` : '';
+const sizeList = () => `<datalist id="dl-size">${SIZES.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+const canon = nm => PRODUCTS.find(p => p.toLowerCase() === String(nm).trim().toLowerCase()) || String(nm).trim();
 const kemList = () => `<datalist id="dl-kem">${KEMS.filter(Boolean).map(k => `<option value="${esc(k)}">`).join('')}</datalist>`;
 function lineHtml(l, i) {
   return `<div class="aline" data-i="${i}">
-    <select data-k="product">${opts(PRODUCTS, l.product)}</select>
-    <select data-k="size">${opts(SIZES, l.size)}</select>
+    ${prodHtml(l, 'data-k')}
+    <input data-k="size" list="dl-size" value="${esc(l.size)}" placeholder="size">
     <input data-k="color" list="dl-color" value="${esc(l.color)}" placeholder="màu">
     <input data-k="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm (tuỳ ý)">
     <input data-k="qty" type="number" min="1" max="20" value="${l.qty}" title="Số đôi giống nhau">
     ${ADD.lines.length > 1 ? `<button class="btn sm bad" data-a="al-del" data-i="${i}" title="Bỏ dòng này">✕</button>` : '<span></span>'}
+    ${prodOther(l, 'data-k')}
     <input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này (tuỳ chọn)">
     <div class="srcrow wide"><span class="mut">Nguồn hàng:</span>
       <label><input type="radio" name="src-${i}" value="new" ${l.src === 'new' ? 'checked' : ''}> Lấy hàng mới</label>
@@ -249,7 +256,7 @@ function newOrderModal(pre = {}) {
   <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802868950124 (các đôi trong cùng đơn dùng chung mã)"></div>
   ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
   <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi · nguồn hàng)</span></div>
-  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}${sizeList()}
   <div id="alines"></div>
   <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}. Mỗi dòng có thể ghi chú riêng.</div>
   <button class="btn sm" data-a="al-add" style="margin-top:6px">+ thêm đôi</button>
@@ -262,7 +269,7 @@ function drawLines() { $('#alines').innerHTML = ADD.lines.map(lineHtml).join('')
 function availFor(i) {
   const l = ADD.lines[i]; if (!normColor(l.color)) return [];
   const taken = new Set(ADD.lines.flatMap((x, j) => j !== i ? x.stockIds : []));
-  return matches({ product: l.product, size: l.size, color: normColor(l.color) }).filter(s => !taken.has(s.id));
+  return matches({ product: canon(l.product), size: String(l.size).trim(), color: normColor(l.color) }).filter(s => !taken.has(s.id));
 }
 function updSug(i) {
   const l = ADD.lines[i], el = $('#sg-' + i), sc = $('#sc-' + i); if (!el) return;
@@ -294,13 +301,15 @@ function addOrders(items) {
 }
 function saveOrder() {
   const date = $('#a-date').value, code = $('#a-code').value.replace(/\D/g, '');
+  if (ADD.lines.some(l => !String(l.product).trim())) return toast('Dòng nào cũng cần có tên sản phẩm');
+  if (ADD.lines.some(l => !String(l.size).trim())) return toast('Dòng nào cũng cần có size');
   if (ADD.lines.some(l => !normColor(l.color))) return toast('Dòng nào cũng cần chọn màu');
   if (code && !ADD.extra && S.orders.some(o => o.code === code) && !confirm('Mã đơn này đã có trong sheet. Vẫn thêm các đôi này vào đơn đó?')) return;
   const items = [], onote = ($('#a-note') ? $('#a-note').value.trim() : '');
   ADD.lines.forEach((l, li) => {
     const n = Math.max(1, Math.min(+l.qty || 1, 20));
     const ids = l.src === 'stock' ? l.stockIds.slice(0, n) : [];
-    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: l.product, size: l.size, color: l.color, kem: l.kem, note: (li === 0 && k === 0 ? [onote, l.note] : [l.note]).filter(Boolean).join(' | ') }, stock: ids[k] ? S.stock.find(s => s.id === ids[k]) : null });
+    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: canon(l.product), size: String(l.size).trim(), color: l.color, kem: l.kem, note: (li === 0 && k === 0 ? [onote, l.note] : [l.note]).filter(Boolean).join(' | ') }, stock: ids[k] ? S.stock.find(s => s.id === ids[k]) : null });
   });
   const used = items.filter(i => i.stock).length;
   addOrders(items);
@@ -349,20 +358,24 @@ function bulkSave() {
 
 /* ===== Sửa đơn ===== */
 let EDIT = null;
+function eLineHtml(l, i) {
+  return `<div class="aline${l.status === 'huy' ? ' cancelled' : ''}" data-i="${i}">
+    ${prodHtml(l, 'data-e')}<input data-e="size" list="dl-size" value="${esc(l.size)}" placeholder="size">
+    <input data-e="color" list="dl-color" value="${esc(l.color)}"><input data-e="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm">
+    <span>${badge(l.status)}</span>
+    ${l.status === 'huy' ? `<button class="btn sm" data-a="e-reopen" data-i="${i}">Mở lại</button>` : (l.status === 'moi' || l.status === 'khong_co' || role === 'chu') ? `<button class="btn sm bad" data-a="e-cancel" data-i="${i}">Hủy đôi này</button>` : '<span></span>'}
+    ${prodOther(l, 'data-e')}
+    <input data-e="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này"></div>`;
+}
 function editModal(gid) {
   const g = groupOf(gid); if (!g) return;
   EDIT = { gid, code: g.code, date: g.date, lines: g.items.map(i => ({ id: i.id, product: i.product, size: i.size, color: i.color, kem: i.kem, note: i.note || '', status: i.status, orig: { product: i.product, size: i.size, color: i.color, kem: i.kem, note: i.note || '' } })) };
   modal(`<h3>Sửa đơn ${esc(g.code) || '(chưa có mã)'}</h3>
   <div class="fld"><label>Ngày</label><input type="date" id="e-date" value="${g.date}"></div>
   <div class="fld"><label>Mã đơn</label><input id="e-code" inputmode="numeric" value="${esc(g.code)}"></div>
-  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}${sizeList()}
   <div class="mut" style="margin:10px 0 4px">Hàng trong đơn:</div>
-  <div id="elines">${EDIT.lines.map((l, i) => `<div class="aline${l.status === 'huy' ? ' cancelled' : ''}" data-i="${i}">
-    <select data-e="product">${opts(PRODUCTS, l.product)}</select><select data-e="size">${opts(SIZES, l.size)}</select>
-    <input data-e="color" list="dl-color" value="${esc(l.color)}"><input data-e="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm">
-    <span>${badge(l.status)}</span>
-    ${l.status === 'huy' ? `<button class="btn sm" data-a="e-reopen" data-i="${i}">Mở lại</button>` : (l.status === 'moi' || l.status === 'khong_co' || role === 'chu') ? `<button class="btn sm bad" data-a="e-cancel" data-i="${i}">Hủy đôi này</button>` : '<span></span>'}
-    <input data-e="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này"></div>`).join('')}</div>
+  <div id="elines">${EDIT.lines.map(eLineHtml).join('')}</div>
   <button class="btn sm" data-a="e-more" style="margin-top:6px">+ thêm đôi vào đơn này</button>
   <div class="row"><button class="btn" data-a="close">Đóng</button><button class="btn pri" data-a="e-save">Lưu thay đổi</button></div>`);
 }
@@ -372,7 +385,8 @@ function saveEdit() {
     const f = {};
     if (code !== g.code) f.code = code;
     if (date !== g.date) f.date = date;
-    ['product', 'size'].forEach(k => { if (l[k] !== l.orig[k]) f[k] = l[k]; });
+    if (canon(l.product) !== l.orig.product) f.product = canon(l.product);
+    if (String(l.size).trim() !== String(l.orig.size)) f.size = String(l.size).trim();
     if (String(l.kem || '').trim() !== l.orig.kem) f.kem = String(l.kem || '').trim();
     if (String(l.note || '').trim() !== l.orig.note) f.note = String(l.note || '').trim();
     if (normColor(l.color) !== l.orig.color) f.color = cap(normColor(l.color));
@@ -380,6 +394,7 @@ function saveEdit() {
   });
   if (!ops.length) return closeModal();
   if (EDIT.lines.some(l => !normColor(l.color))) return toast('Dòng nào cũng cần có màu');
+  if (EDIT.lines.some(l => !String(l.product).trim() || !String(l.size).trim())) return toast('Dòng nào cũng cần có sản phẩm và size');
   save(ops); closeModal(); toast('Đang lưu thay đổi…');
 }
 
@@ -563,6 +578,12 @@ document.addEventListener('input', e => {
     const row = el.closest('[data-i]'), i = row ? +row.dataset.i : -1;
     if (ADD && row && row.parentElement.id === 'alines') {
       const l = ADD.lines[i];
+      if (el.dataset.k === 'productSel') {
+        if (el.value === '__other__') { l.custom = true; l.product = ''; } else { l.custom = false; l.product = el.value; }
+        l.stockIds = []; l.autoPick = l.src === 'stock'; drawLines();
+        if (l.custom) { const inp = document.querySelector(`.aline[data-i="${i}"] [data-k=product]`); if (inp) inp.focus(); }
+        return;
+      }
       if (el.dataset.k) {
         l[el.dataset.k] = el.dataset.k === 'qty' ? Math.max(1, Math.min(+el.value || 1, 20)) : el.value;
         if (['product', 'size', 'color'].includes(el.dataset.k)) { l.stockIds = []; l.autoPick = l.src === 'stock'; }
@@ -578,7 +599,16 @@ document.addEventListener('input', e => {
       }
       return;
     }
-    if (EDIT && row && row.parentElement.id === 'elines' && el.dataset.e) { EDIT.lines[i][el.dataset.e] = el.value; return; }
+    if (EDIT && row && row.parentElement.id === 'elines' && el.dataset.e) {
+      const l = EDIT.lines[i];
+      if (el.dataset.e === 'productSel') {
+        if (el.value === '__other__') { l.custom = true; l.product = ''; } else { l.custom = false; l.product = el.value; }
+        $('#elines').innerHTML = EDIT.lines.map(eLineHtml).join('');
+        if (l.custom) { const inp = document.querySelector(`#elines .aline[data-i="${i}"] [data-e=product]`); if (inp) inp.focus(); }
+        return;
+      }
+      l[el.dataset.e] = el.value; return;
+    }
   }
   const f = el.dataset.f; if (!f) return;
   F[f] = el.value;
