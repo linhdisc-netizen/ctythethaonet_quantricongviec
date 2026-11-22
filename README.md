@@ -10,6 +10,11 @@ Trình duyệt (GitHub Pages)  ──mật khẩu──►  Apps Script (backend
 - Repo này công khai nên **không chứa dữ liệu đơn hàng hay mật khẩu**.
 - Ba vai trò, mỗi vai trò một mật khẩu: **Shop** (lên đơn), **Kho** (đóng hàng, nhập tồn), **Chủ** (làm được mọi thao tác).
 
+## Hướng dẫn cho cả nhóm
+- Trang hướng dẫn nằm cùng địa chỉ với app, đường dẫn thêm `/huong-dan/` (cũng có nút **Hướng dẫn** ở góc trên app). Có hai phần tách riêng: **Chủ shop / Shop** và **Kho vận**.
+- Mỗi phần có video có lời đọc tiếng Việt và phụ đề (khoảng 3 phút) kèm hướng dẫn từng bước bằng ảnh. Ảnh và video dùng **dữ liệu mẫu** (mã đơn giả), không chứa đơn hàng thật.
+- Làm lại video khi app đổi giao diện: chụp lại ảnh, chạy lại bộ dựng (ffmpeg + giọng đọc Microsoft An của Windows).
+
 ## Cấu trúc Google Sheet (lấy từ file Excel mẫu `Don-hang-TTS-moi.xlsx`)
 | Tab | Nội dung |
 |---|---|
