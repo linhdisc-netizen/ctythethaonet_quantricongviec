@@ -90,7 +90,8 @@ function setCell(t, r, header, value) {
 }
 function toDate(s) {
   const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(s || '');
-  return m ? Utilities.parseDate(s, tz(), 'yyyy-MM-dd') : '';
+  // Ghi ngày vào 12:00 trưa (không phải 00:00) để dù múi giờ Sheet là GMT hay Việt Nam thì ô vẫn hiện đúng ngày.
+  return m ? Utilities.parseDate(s + 'T12:00:00', tz(), "yyyy-MM-dd'T'HH:mm:ss") : '';
 }
 const todayStr = () => fmt(new Date(), 'yyyy-MM-dd');
 const nowStr = () => fmt(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
