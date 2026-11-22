@@ -256,7 +256,7 @@ function newOrderModal(pre = {}) {
   const kemHint = 'Đóng kèm viết tự do, ví dụ: 2 tất đen + 1 bó gối';
   modal(`<h3>${pre.code ? 'Thêm đôi vào đơn ' + esc(pre.code) : 'Thêm đơn'}</h3>
   <div class="fld"><label>Ngày</label><input type="date" id="a-date" value="${ADD.date}"></div>
-  <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802868950124 (các đôi trong cùng đơn dùng chung mã)"></div>
+  <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802123456789 (các đôi trong cùng đơn dùng chung mã)"></div>
   ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
   <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi · nguồn hàng)</span></div>
   <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}${sizeList()}
@@ -333,7 +333,7 @@ function parseLine(line) {
   return { product: pm && pm[1], size: sm && sm[1], color, code, qty, note, kem: kemFree || (/bó gối/.test(t) ? 'bó gối' : /\btất\b/.test(t) ? 'tất' : '') };
 }
 function bulkModal() {
-  modal(`<h3>Dán nhiều đơn</h3><p class="mut">Mỗi dòng một đôi. Các dòng cùng mã đơn sẽ thành một đơn nhiều đôi. Thêm <span class="code">x2</span> hoặc <span class="code">2 đôi</span> nếu có nhiều đôi giống nhau.<br>Ví dụ: <span class="code">nagaki karyu 42 xanh ngọc 802868950124 x2 kèm 2 tất đen ghi chú giao giờ hành chính</span><br>Sau chữ <b>kèm</b> là đồ đóng kèm, sau <b>ghi chú</b> là ghi chú (viết tự do).</p>
+  modal(`<h3>Dán nhiều đơn</h3><p class="mut">Mỗi dòng một đôi. Các dòng cùng mã đơn sẽ thành một đơn nhiều đôi. Thêm <span class="code">x2</span> hoặc <span class="code">2 đôi</span> nếu có nhiều đôi giống nhau.<br>Ví dụ: <span class="code">nagaki karyu 42 xanh ngọc 802123456789 x2 kèm 2 tất đen ghi chú giao giờ hành chính</span><br>Sau chữ <b>kèm</b> là đồ đóng kèm, sau <b>ghi chú</b> là ghi chú (viết tự do).</p>
   <textarea id="bulk" rows="9" placeholder="Dán danh sách đơn ở đây…"></textarea>
   <label style="display:block;margin:8px 0"><input type="checkbox" id="bulk-auto"> Tự dùng hàng tồn nếu kho có đúng mẫu (đôi đó sẽ được <b>đánh dấu Đã dùng</b> và trừ khỏi kho). Không tích thì tất cả lấy hàng mới.</label><div id="bulk-res" class="mut"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="bulk-save">Thêm các dòng hợp lệ</button></div>`);
