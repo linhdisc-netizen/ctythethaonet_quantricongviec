@@ -55,6 +55,13 @@ Repo → **Settings → Pages**: *Source* = **Deploy from a branch**, *Branch* =
 - **Trả hàng về:** nhập hoặc **quét mã đơn** trả về rồi Enter (có thể dán nhiều mã). App tự điền mẫu, size, màu từ đơn. Kho tick đôi nào được trả về và chọn **Tốt / Lỗi**. Đôi Tốt vào kho (dùng lại được), đôi Lỗi không tính còn hàng. Đơn gốc đổi sang **Đã hoàn** (trả một phần thì chỉ đôi đó hoàn). Chỉ đơn Đã giao / Đã đóng mới nhập hoàn được. Nhập nhầm thì bấm **Hoàn tác nhập**. Không có mã đơn thì dùng **Nhập tay**.
 - **Kiểm kho hàng tháng:** bấm **Kiểm kho**, app liệt kê tồn theo mẫu (sổ sách). Chỉ gõ số đếm thực tế ở mẫu đã đếm; thiếu thì đánh dấu **Thất thoát**, thừa thì thêm vào kho, có thể thêm mẫu ngoài sổ. Kết quả lưu ở tab **Kiểm kho**; từ ngày 25 hàng tháng app nhắc nếu chưa kiểm. Tổng quan có thêm số đôi đã hoàn và tỷ lệ hoàn.
 
+## Chốt tháng (chỉ Chủ)
+- Tab **Chốt tháng** tự tính tiền cuối tháng từ các đôi đã đóng (theo **ngày lên đơn**), đúng cách tính của hai file Excel tháng 10: **Shop** trả theo bậc thang số đôi trong ngày (dưới 10: 10.000đ, dưới 30: 7.000đ, dưới 50: 6.000đ, dưới 100: 5.000đ, áp cho cả ngày) và **kho / đối tác** nhận 5.000đ/đôi. Đơn nhiều đôi (hơn 5 đôi) tính riêng (Shop 5.000đ, hơn 10 đôi 4.000đ; đối tác 2.500đ mỗi đôi).
+- Mỗi bên một thẻ với nút **Excel** (có công thức, kèm sheet danh sách đơn) và **PDF** (kèm phụ lục). Bản gửi Shop chỉ có giá của Shop, bản gửi đối tác chỉ có giá của đối tác; khoản chênh lệch chỉ hiện trên màn hình của Chủ.
+- **Chốt tháng** lưu số liệu vào tab "Chốt tháng" của Google Sheet; nếu đơn bị sửa sau đó, app báo "khác lúc chốt".
+- Mọi mức giá và quy tắc nằm trong tab **Bảng giá** của Google Sheet (cũng sửa được ngay trong app, mục "Bảng giá"). Giá và số liệu chốt chỉ được gửi về trình duyệt của vai trò Chủ.
+- Xuất file chạy hoàn toàn trong trình duyệt, thư viện nằm trong thư mục `vendor/` (xem `vendor/LICENSES.txt`).
+
 ## Đơn nhiều đôi (kiện)
 - Mỗi dòng trong tab Đơn hàng là **một đôi**. Các dòng có **cùng Mã đơn** được app gom thành **một đơn** (kiện). Khi nhập tay trong Sheet, hãy ghi cùng mã ở mọi dòng, đừng gộp ô.
 - **Đóng kèm viết tự do:** ô Đóng kèm gõ gì cũng được (ví dụ `2 tất đen + 1 bó gối`), có gợi ý bó gối, tất. Mỗi đôi có **ô ghi chú riêng**, và có **ghi chú chung cả đơn** khi tạo mới. Ghi chú hiện cho cả Shop và Kho (📝). Khi dán nhiều đơn: sau chữ **kèm** là đồ đóng kèm, sau **ghi chú** là ghi chú.

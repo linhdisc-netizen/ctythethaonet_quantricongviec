@@ -11,7 +11,7 @@ let KEMS = ['', 'bó gối', 'tất'];
 const ST = { moi: 'Chờ đóng', da_dong: 'Đã đóng', da_giao: 'Đã giao', khong_co: 'Không có hàng', hoan: 'Đã hoàn', huy: 'Đã hủy' };
 const ST_TO_CODE = Object.fromEntries(Object.entries(ST).map(([k, v]) => [v, k]));
 const ROLES = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
-const TABS = [['orders', 'Đơn hàng'], ['pack', 'Cần đóng'], ['stock', 'Tồn kho'], ['dash', 'Tổng quan']];
+const TABS = [['orders', 'Đơn hàng'], ['pack', 'Cần đóng'], ['stock', 'Tồn kho'], ['dash', 'Tổng quan'], ['close', 'Chốt tháng']];
 const API = (window.APP_CONFIG || {}).api;
 
 /* ===== Tiện ích ===== */
@@ -24,7 +24,7 @@ const normColor = s => (s || '').toLowerCase().replace(/[']/g, '').replace(/\s+/
 const key = x => [x.product, x.size, x.color].join('|');
 const lineText = x => `${x.product} · ${x.size} · ${cap(x.color)}`;
 function toast(t) { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => e.hidden = true, 3200); }
-function setSync(t, bad) { const e = $('#sync'); e.textContent = t; e.style.color = bad ? 'var(--bad)' : ''; }
+function setSync(t, bad) { const e = $('#sync'); e.textContent = t; e.style.color = bad ? 'var(--bad)' : ''; $('#usermenu').classList.toggle('bad', !!bad); }
 
 /* ===== Dữ liệu ===== */
 let S = { orders: [], stock: [], comments: [], log: [], groups: [] };
@@ -60,6 +60,8 @@ function build(d) {
   })).filter(x => x.product);
   S.comments = d.comments.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
   S.log = d.log.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
+  S.pricing = d.pricing || null;
+  S.closes = (d.closes || []).map(([m, who, ts, pairs, shop, partner, margin]) => ({ month: String(m), who, ts: Date.parse(ts) || 0, pairs: +pairs || 0, shop: +shop || 0, partner: +partner || 0, margin: +margin || 0 }));
   S.checks = (d.checks || []).map(([ts, who, p, sz, c, book, act, diff, action]) => ({ ts: Date.parse(ts) || 0, who, p: String(p), sz: String(sz), c: String(c), book, act, diff, action: String(action || '') }));
 }
 // Gom các dòng cùng Mã đơn thành kiện. Dòng chưa có mã thì tự là một kiện riêng.
@@ -109,7 +111,7 @@ function showLogin(msg) { $('#login').hidden = false; $('#login-err').textConten
 function logout(msg) {
   try { localStorage.removeItem('tts-pw'); } catch { /* bỏ qua */ }
   PW = ''; role = null; S = { orders: [], stock: [], comments: [], log: [], groups: [] };
-  $('#main').innerHTML = ''; $('#tabs').innerHTML = ''; $('#me').textContent = ''; $('#logout').hidden = true; setSync('');
+  $('#main').innerHTML = ''; $('#tabs').innerHTML = ''; $('#me').textContent = ''; $('#logout').hidden = true; $('#usermenu').hidden = true; setSync('');
   showLogin(msg);
 }
 async function enter() {
@@ -117,7 +119,7 @@ async function enter() {
   role = j.role;
   setSync('Đang tải…');
   const d = await api('load'); build(d);
-  $('#login').hidden = true; $('#me').textContent = 'Vai trò: ' + ROLES[role]; $('#logout').hidden = false;
+  $('#login').hidden = true; $('#me').textContent = ROLES[role]; $('#logout').hidden = false; $('#usermenu').hidden = false;
   try { localStorage.setItem('tts-pw', PW); } catch { /* bỏ qua */ }
   const dates = S.orders.map(o => o.date).sort();
   F.date = S.orders.some(o => o.date === today()) ? today() : (dates[dates.length - 1] || '');
@@ -175,11 +177,12 @@ function groupButtons(g) {
 function render() {
   if (!role) return;
   buildGroups();
-  $('#tabs').innerHTML = TABS.map(([k, t]) => {
+  if (tab === 'close' && role !== 'chu') tab = 'orders';
+  $('#tabs').innerHTML = TABS.filter(([k]) => k !== 'close' || role === 'chu').map(([k, t]) => {
     const n = k === 'pack' ? S.groups.filter(g => has(g, 'moi')).length : 0;
     return `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}${n ? ` (${n})` : ''}</button>`;
   }).join('');
-  ({ orders: vOrders, pack: vPack, stock: vStock, dash: vDash }[tab] || vOrders)();
+  ({ orders: vOrders, pack: vPack, stock: vStock, dash: vDash, close: vClose }[tab] || vOrders)();
 }
 const badge = s => `<span class="badge b-${s}">${ST[s]}</span>`;
 const opts = (arr, sel) => arr.map(v => `<option ${String(v) === String(sel) ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -193,37 +196,31 @@ function filteredGroups() {
   return S.groups.filter(g => (!F.date || g.date === F.date) && (!F.st || g.status === F.st) &&
     (!q || g.items.some(o => (o.code + ' ' + o.product + ' ' + o.color + ' ' + o.size).toLowerCase().includes(q))));
 }
+function ordRow(g) {
+  const nc = g.items.reduce((c, i) => c + S.comments.filter(x => x.key === i.id).length + i.notes.length, 0);
+  const miss = g.active.filter(i => i.status === 'khong_co').length, hn = g.active.filter(i => i.status === 'hoan').length;
+  const canEdit = can('shop') && (g.status !== 'da_giao' || role === 'chu');
+  return `<div class="ord"><div class="o-meta"><span class="o-date">${fmtD(g.date)}</span><span class="code">${esc(g.code) || '<span class="mut">—</span>'}</span>${g.active.length > 1 ? `<span class="tag">${g.active.length} đôi</span>` : ''}</div>
+    <div class="o-items">${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
+      ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</div>
+    <div class="o-st">${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${hn && g.status !== 'hoan' ? `<div class="mut">${hn} đôi đã hoàn</div>` : ''}</div>
+    <div class="o-acts">${groupButtons(g)}<button class="btn sm ic" data-a="cm" data-g="${g.id}" title="Trao đổi">💬${nc ? ' ' + nc : ''}</button>${canEdit ? `<button class="btn sm ic" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</div></div>`;
+}
 function vOrders() {
   const dates = [...new Set(S.groups.map(g => g.date))].sort().reverse();
   const base = S.groups.filter(g => !F.date || g.date === F.date);
-  const cnt = s => base.filter(g => g.status === s).length;
+  const cnt = st => base.filter(g => g.status === st).length;
   const rows = filteredGroups();
+  const chips = [['', 'Tất cả', base.length], ...Object.keys(ST).map(k => [k, ST[k], cnt(k)])].filter(([k, , c]) => k === '' || c > 0 || F.st === k);
   $('#main').innerHTML = `
   <div class="bar">
     <select data-f="date"><option value="">Tất cả ngày</option>${dates.map(d => `<option value="${d}" ${d === F.date ? 'selected' : ''}>${fmtD(d)}/${d.slice(0, 4)}</option>`).join('')}</select>
-    <input data-f="q" placeholder="Tìm mã đơn, sản phẩm, màu…" value="${esc(F.q)}">
-    <span class="sp"></span>
-    <button class="btn" data-a="reload">⟳ Tải lại</button>
-    <button class="btn" data-a="csv">⬇ Xuất CSV</button>
-    ${can('shop') ? '<button class="btn" data-a="bulk">Dán nhiều đơn</button><button class="btn pri" data-a="new">+ Thêm đơn</button>' : ''}
+    <input data-f="q" class="grow" placeholder="Tìm mã đơn, sản phẩm, màu…" value="${esc(F.q)}">
+    ${can('shop') ? '<button class="btn pri" data-a="new">+ Thêm đơn</button>' : ''}
+    <details class="more"><summary class="btn ic" aria-label="Thêm tuỳ chọn">⋯</summary><div class="menu">${can('shop') ? '<button data-a="bulk">Dán nhiều đơn</button>' : ''}<button data-a="csv">Xuất CSV</button><button data-a="reload">Tải lại dữ liệu</button></div></details>
   </div>
-  <div class="chips" style="margin-bottom:12px">
-    <span class="chip ${F.st === '' ? 'on' : ''}" data-st="">Tất cả ${base.length}</span>
-    ${Object.keys(ST).map(s => `<span class="chip ${F.st === s ? 'on' : ''}" data-st="${s}">${ST[s]} ${cnt(s)}</span>`).join('')}
-  </div>
-  <div class="wrap"><table class="tbl"><thead><tr><th>Ngày</th><th>Mã đơn</th><th>Hàng trong đơn</th><th>Trạng thái</th><th></th><th></th></tr></thead><tbody>
-  ${rows.slice(0, 300).map(g => {
-    const nc = g.items.reduce((n, i) => n + S.comments.filter(c => c.key === i.id).length + i.notes.length, 0);
-    const miss = g.active.filter(i => i.status === 'khong_co').length;
-    return `<tr><td>${fmtD(g.date)}</td>
-    <td class="code">${esc(g.code) || '<span class="mut">—</span>'}${g.active.length > 1 ? `<div><span class="tag">${g.active.length} đôi</span></div>` : ''}</td>
-    <td>${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
-      ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</td>
-    <td>${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${g.active.some(i => i.status === 'hoan') && g.status !== 'hoan' ? `<div class="mut">${g.active.filter(i => i.status === 'hoan').length} đôi đã hoàn</div>` : ''}</td>
-    <td><div class="acts">${groupButtons(g)}</div></td>
-    <td class="nw"><button class="btn sm" data-a="cm" data-g="${g.id}">💬${nc ? ' ' + nc : ''}</button>${can('shop') && (g.status !== 'da_giao' || role === 'chu') ? ` <button class="btn sm" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</td></tr>`;
-  }).join('') || '<tr><td colspan="6" class="mut">Không có đơn nào.</td></tr>'}
-  </tbody></table></div>${rows.length > 300 ? `<p class="mut">Đang hiện 300/${rows.length} đơn – hãy lọc theo ngày.</p>` : ''}`;
+  <div class="chips">${chips.map(([k, t, c]) => `<span class="chip ${F.st === k ? 'on' : ''}" data-st="${k}">${t} ${c}</span>`).join('')}</div>
+  <div class="list">${rows.slice(0, 300).map(ordRow).join('') || '<div class="empty">Không có đơn nào.</div>'}</div>${rows.length > 300 ? `<p class="mut">Đang hiện 300/${rows.length} đơn – hãy lọc theo ngày.</p>` : ''}`;
 }
 
 /* ===== Thêm đơn (nhiều đôi) ===== */
@@ -245,10 +242,10 @@ function lineHtml(l, i) {
     <input data-k="qty" type="number" min="1" max="20" value="${l.qty}" title="Số đôi giống nhau">
     ${ADD.lines.length > 1 ? `<button class="btn sm bad" data-a="al-del" data-i="${i}" title="Bỏ dòng này">✕</button>` : '<span></span>'}
     ${prodOther(l, 'data-k')}
-    <input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này (tuỳ chọn)">
-    <div class="srcrow wide"><span class="mut">Nguồn hàng:</span>
-      <label><input type="radio" name="src-${i}" value="new" ${l.src === 'new' ? 'checked' : ''}> Lấy hàng mới</label>
-      <label><input type="radio" name="src-${i}" value="stock" ${l.src === 'stock' ? 'checked' : ''}> Dùng hàng tồn <span class="tag stock" id="sc-${i}"></span></label></div>
+    ${l.note || l.showNote ? `<input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này">` : ''}
+    <div class="srcrow wide"><span class="mut">Nguồn:</span>
+      <label><input type="radio" name="src-${i}" value="new" ${l.src === 'new' ? 'checked' : ''}> Hàng mới</label>
+      <label><input type="radio" name="src-${i}" value="stock" ${l.src === 'stock' ? 'checked' : ''}> Dùng tồn <span class="tag stock" id="sc-${i}"></span></label>${l.note || l.showNote ? '' : `<button type="button" class="linkbtn" data-a="al-note" data-i="${i}">+ ghi chú</button>`}</div>
     <div class="sugg-line" id="sg-${i}"></div></div>`;
 }
 function newOrderModal(pre = {}) {
@@ -258,10 +255,10 @@ function newOrderModal(pre = {}) {
   <div class="fld"><label>Ngày</label><input type="date" id="a-date" value="${ADD.date}"></div>
   <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802123456789 (các đôi trong cùng đơn dùng chung mã)"></div>
   ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
-  <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi · nguồn hàng)</span></div>
+  <div class="mut" style="margin:10px 0 4px">Hàng trong đơn</div>
   <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}${sizeList()}
   <div id="alines"></div>
-  <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}. Mỗi dòng có thể ghi chú riêng.</div>
+  <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}.</div>
   <button class="btn sm" data-a="al-add" style="margin-top:6px">+ thêm đôi</button>
   <div id="a-sum" class="sum"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="save-order">Lưu đơn</button></div>`);
@@ -431,9 +428,10 @@ function vPack() {
   $('#main').innerHTML = `<div class="grid">
     <div class="stat"><b>${gs.length}</b><span>đơn chờ đóng</span></div>
     <div class="stat"><b>${lines.length}</b><span>đôi cần lấy</span></div>
-    <div class="stat"><b>${Object.entries(kem).map(([k, n]) => n + ' ' + k).join(', ') || '—'}</b><span>cần đóng kèm</span></div></div>
+    <div class="stat"><b>${lines.filter(i => i.kem).length}</b><span>đôi có đồ kèm</span></div></div>
   ${lines.length ? `<details class="card"><summary><b>Tổng hợp cần lấy hàng</b> <span class="mut">(${Object.keys(pick).length} mẫu)</span></summary>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.entries(pick).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<span class="tag">${esc(p)} · ${s} · ${esc(cap(c))} <b>× ${n}</b></span>`; }).join('')}</div></details>` : ''}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${Object.entries(pick).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<span class="tag">${esc(p)} · ${s} · ${esc(cap(c))} <b>× ${n}</b></span>`; }).join('')}</div>
+    ${Object.keys(kem).length ? `<div class="mut" style="margin-top:10px">Đồ đóng kèm cần chuẩn bị: ${Object.entries(kem).map(([k, c]) => `<b>${c}</b> ${esc(k)}`).join(' · ')}</div>` : ''}</details>` : ''}
   ${gs.length ? '' : '<div class="card">🎉 Không còn đơn nào chờ đóng.</div>'}
   ${gs.map(g => {
     const todo = g.items.filter(i => i.status === 'moi' || i.status === 'khong_co');
@@ -465,20 +463,21 @@ function vStock() {
   const remind = can('kho') && !thisMonth && new Date().getDate() >= 25;
   const lastBatch = lc ? (S.checks || []).filter(c => Math.abs(c.ts - lc.ts) < 5000 && c.p !== '(Chốt kiểm kho)' && +c.diff !== 0) : [];
   $('#main').innerHTML = `${remind ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
-  <div class="bar"><div class="chips">
-    ${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
-    <input data-f="stockQ" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}"><span class="sp"></span>
-    ${can('kho') ? '<button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button><button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn" data-a="check-open">☑ Kiểm kho</button>' : ''}</div>
-  <div class="card"><b>Tồn hiện có theo mẫu</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+  <div class="bar">
+    <input data-f="stockQ" class="grow" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}">
+    ${can('kho') ? '<button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button>' : ''}
+    ${can('kho') ? '<details class="more"><summary class="btn ic" aria-label="Thêm tuỳ chọn">⋯</summary><div class="menu"><button data-a="check-open">☑ Kiểm kho</button></div></details>' : ''}</div>
+  <div class="chips">${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
+  <details class="card" id="stock-info" ${(F.stockInfoOpen ?? innerWidth > 640) ? 'open' : ''}><summary><b>Tồn hiện có theo mẫu</b> <span class="mut">(${Object.keys(piv).length} mẫu · ${av.length} đôi)</span></summary><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
     ${Object.entries(piv).sort().map(([k, c]) => { const [p, sz, cl] = k.split('|'); return `<span class="tag stock">${esc(p)} · ${esc(sz)} · ${esc(cap(cl))} × ${c}</span>`; }).join('') || '<span class="mut">Kho trống</span>'}</div>
     ${lc ? `<div class="mut" style="margin-top:8px">Lần kiểm kho gần nhất: ${new Date(lc.ts).toLocaleDateString('vi-VN')} · ${esc(lc.who)} · ${esc(lc.action)}</div>` : '<div class="mut" style="margin-top:8px">Chưa có lần kiểm kho nào.</div>'}
-    ${lastBatch.length ? `<details style="margin-top:6px"><summary class="mut">Mẫu lệch ở lần kiểm gần nhất (${lastBatch.length})</summary><div class="mut code">${lastBatch.map(c => esc(`${c.p} · ${c.sz} · ${c.c}: sổ ${c.book} → thực tế ${c.act} (${c.diff > 0 ? '+' : ''}${c.diff})`)).join('<br>')}</div></details>` : ''}</div>
-  <div class="wrap"><table class="tbl"><thead><tr><th>Ngày nhập</th><th>Loại</th><th>Mẫu</th><th>Mã đơn hoàn</th><th>Tình trạng</th><th>Ghi chú</th><th></th></tr></thead><tbody>
-  ${rows.slice(0, 400).map(s => {
+    ${lastBatch.length ? `<details style="margin-top:6px"><summary class="mut">Mẫu lệch ở lần kiểm gần nhất (${lastBatch.length})</summary><div class="mut code">${lastBatch.map(c => esc(`${c.p} · ${c.sz} · ${c.c}: sổ ${c.book} → thực tế ${c.act} (${c.diff > 0 ? '+' : ''}${c.diff})`)).join('<br>')}</div></details>` : ''}</details>
+  <div class="list">${rows.slice(0, 400).map(s => {
     const undo = can('kho') && /Hoàn từ đơn D\d+/.test(s.note) && (s.state === 'con' || s.state === 'loi');
-    return `<tr><td>${fmtD(s.date)}</td><td>${TYPE_TXT[s.type]}</td><td>${esc(lineText(s))}</td><td class="code">${esc(s.ref) || '—'}</td><td>${stockBadge(s)}</td><td class="mut">${esc(s.note)}</td>
-    <td><div class="acts">${can('kho', 'shop') ? (s.state === 'used' ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : s.state === 'con' ? `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>` : '') : ''}${undo ? `<button class="btn sm bad" data-a="ret-undo" data-id="${s.id}" title="Nhập nhầm: bỏ dòng hoàn này và trả đơn về Đã giao">Hoàn tác nhập</button>` : ''}</div></td></tr>`; }).join('') || '<tr><td colspan="7" class="mut">Không có dòng nào.</td></tr>'}
-  </tbody></table></div>${rows.length > 400 ? `<p class="mut">Đang hiện 400/${rows.length} dòng – hãy lọc hoặc tìm kiếm.</p>` : ''}`;
+    return `<div class="ord stk"><div class="o-meta"><span class="o-date">${fmtD(s.date)}</span><span class="mut">${TYPE_TXT[s.type]}</span></div>
+      <div class="o-items"><div class="ln">${esc(lineText(s))}</div>${s.ref ? `<div class="mut code">${esc(s.ref)}</div>` : ''}${s.note ? `<div class="mut note-ln">${esc(s.note)}</div>` : ''}</div>
+      <div class="o-st">${stockBadge(s)}</div>
+      <div class="o-acts">${can('kho', 'shop') ? (s.state === 'used' ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : s.state === 'con' ? `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>` : '') : ''}${undo ? `<button class="btn sm bad" data-a="ret-undo" data-id="${s.id}" title="Nhập nhầm: bỏ dòng hoàn này và trả đơn về Đã giao">Hoàn tác nhập</button>` : ''}</div></div>`; }).join('') || '<div class="empty">Không có dòng nào.</div>'}</div>${rows.length > 400 ? `<p class="mut">Đang hiện 400/${rows.length} dòng – hãy lọc hoặc tìm kiếm.</p>` : ''}`;
 }
 
 /* --- Nhập hàng mới (lưới size) --- */
@@ -649,6 +648,52 @@ function vDash() {
     <div class="card"><b>Theo size</b>${bars(by(o => o.size))}</div></div>`;
 }
 
+/* ===== Chốt tháng (chỉ Chủ) ===== */
+const PRICING_FIELDS = [
+  ['Tên trên bảng', [['shop_name', 'Shop', 'text'], ['partner_name', 'Kho / đối tác', 'text'], ['issuer', 'Người lập', 'text']]],
+  ['Shop: giá mỗi đôi theo số đôi trong ngày', [['shop_t1_max', 'Mức 1: dưới (đôi)'], ['shop_t1_price', 'Giá'], ['shop_t2_max', 'Mức 2: dưới'], ['shop_t2_price', 'Giá'], ['shop_t3_max', 'Mức 3: dưới'], ['shop_t3_price', 'Giá'], ['shop_t4_max', 'Mức 4: dưới'], ['shop_t4_price', 'Giá'], ['shop_t5_price', 'Từ mức 4: giá']]],
+  ['Đơn nhiều đôi', [['bulk_on', 'Tính riêng (Có/Không)', 'text'], ['bulk_min', 'Là đơn nhiều đôi khi hơn (đôi)'], ['shop_bulk_price', 'Shop: giá/đôi'], ['shop_bulk_big_min', 'Mức rất nhiều: hơn (đôi)'], ['shop_bulk_big_price', 'Shop: giá/đôi'], ['partner_bulk_price', 'Đối tác: giá/đôi']]],
+  ['Khác', [['partner_price', 'Đối tác: giá/đôi (đơn thường)'], ['count_returned', 'Tính phí đôi đã hoàn (Có/Không)', 'text']]],
+];
+const fmtM = n => Number(n || 0).toLocaleString('vi-VN');
+const monthsAvail = () => [...new Set(S.orders.map(o => o.date.slice(0, 7)))].sort().reverse();
+function defaultCloseMonth() {
+  const ms = monthsAvail(), d = new Date(), cur = today().slice(0, 7);
+  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1).toLocaleDateString('sv').slice(0, 7);
+  return d.getDate() <= 7 && ms.includes(prev) ? prev : ms.includes(cur) ? cur : ms[0] || cur;
+}
+const billLines = () => S.orders.map(o => ({ id: o.id, date: o.date, status: o.status, code: o.code, product: o.product, size: o.size, color: o.color, kem: o.kem }));
+const currentBill = () => Billing.computeMonth(billLines(), F.closeMonth || defaultCloseMonth(), S.pricing || {});
+const latestClose = m => (S.closes || []).filter(c => c.month === m).sort((a, b) => b.ts - a.ts)[0] || null;
+function vClose() {
+  if (!F.closeMonth) F.closeMonth = defaultCloseMonth();
+  const month = F.closeMonth, R = currentBill(), P = R.P, cl = latestClose(month), months = monthsAvail();
+  const inMonth = S.orders.filter(o => o.date.startsWith(month));
+  const pend = inMonth.filter(o => o.status === 'moi').length, noCode = R.rows.filter(r => !r.code).length;
+  const changed = cl && (cl.shop !== R.totals.shop || cl.partner !== R.totals.partner);
+  const card = (kind) => {
+    const shop = kind === 'shop', amt = shop ? R.totals.shop : R.totals.partner;
+    return `<div class="card bill"><div class="mut">${shop ? 'Gửi Shop' : 'Thanh toán kho / đối tác'} · <b>${esc(shop ? P.shop_name : P.partner_name)}</b></div>
+      <div class="amt">${fmtM(amt)} <small>đ</small></div><div class="mut">${R.days.length} ngày · ${fmtM(R.totals.pairs)} đôi</div>
+      <div class="acts" style="justify-content:flex-start;margin:10px 0"><button class="btn pri" data-a="bill" data-kind="${kind}" data-fmt="xlsx">⬇ Excel</button><button class="btn" data-a="bill" data-kind="${kind}" data-fmt="pdf">⬇ PDF</button></div>
+      <details><summary class="mut">Xem theo ngày</summary><div class="wrap"><table class="tbl"><thead><tr><th>Ngày</th><th class="num">Đôi</th>${shop ? '<th class="num">Đơn giá</th>' : ''}<th class="num">Thành tiền</th></tr></thead><tbody>
+      ${R.days.map(d => `<tr><td>${fmtD(d.date)}</td><td class="num">${d.pairs}</td>${shop ? `<td class="num">${d.bulk + d.bulkBig ? '…' : fmtM(d.tierPrice)}</td>` : ''}<td class="num">${fmtM(shop ? d.shopTotal : d.partnerTotal)}</td></tr>`).join('') || '<tr><td colspan="4" class="mut">Chưa có đôi nào được đóng.</td></tr>'}
+      </tbody></table></div></details></div>`;
+  };
+  $('#main').innerHTML = `<div class="bar"><select data-f="closeMonth">${months.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>Tháng ${m.slice(5)}/${m.slice(0, 4)}</option>`).join('')}</select>
+      <span class="sp"></span><label class="mut" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-a="bill-list" ${F.billList === false ? '' : 'checked'}> Kèm danh sách đơn</label>
+      <button class="btn pri" data-a="close-month">Chốt tháng</button></div>
+    ${cl ? `<div class="${changed ? 'warn' : 'note'}">${changed ? '⚠ Số liệu hiện tại khác lúc chốt. ' : '✔ '}Đã chốt ${new Date(cl.ts).toLocaleDateString('vi-VN')} bởi ${esc(cl.who)}: Shop ${fmtM(cl.shop)}đ · đối tác ${fmtM(cl.partner)}đ${changed ? `. Hiện tại: Shop ${fmtM(R.totals.shop)}đ · đối tác ${fmtM(R.totals.partner)}đ. Bấm Chốt tháng để cập nhật.` : '.'}</div>` : ''}
+    ${pend ? `<div class="warn">⚠ Còn ${pend} đôi chờ đóng trong tháng này, chưa được tính phí.</div>` : ''}${noCode ? `<div class="warn">⚠ ${noCode} đôi tính phí chưa có mã đơn.</div>` : ''}
+    <div class="grid"><div class="stat"><b>${fmtM(R.totals.pairs)}</b><span>đôi tính phí</span></div><div class="stat"><b>${fmtM(R.totals.shop)}</b><span>thu từ Shop (đ)</span></div>
+      <div class="stat"><b>${fmtM(R.totals.partner)}</b><span>trả đối tác (đ)</span></div><div class="stat"><b>${fmtM(R.totals.margin)}</b><span>chênh lệch (đ), chỉ Chủ thấy</span></div></div>
+    <div class="grid2">${card('shop')}${card('partner')}</div>
+    <details class="card" id="pr-box"><summary><b>Bảng giá</b> <span class="mut">(sửa được, lưu trong Google Sheet)</span></summary>
+      ${PRICING_FIELDS.map(([t, fs]) => `<div class="mut" style="margin:12px 0 4px">${t}</div><div class="prg">${fs.map(([k, l, ty]) => `<label><span>${l}</span><input data-pr="${k}" ${ty === 'text' ? '' : 'inputmode="numeric"'} value="${esc(P[k])}"></label>`).join('')}</div>`).join('')}
+      <div class="row"><button class="btn pri" data-a="pricing-save">Lưu bảng giá</button></div></details>`;
+}
+const loadJs = src => new Promise((res, rej) => { if (window.Export) return res(); const e = document.createElement('script'); e.src = src; e.onload = res; e.onerror = () => rej(new Error('Không tải được ' + src)); document.head.appendChild(e); });
+
 /* ===== Xuất CSV ===== */
 function exportCSV() {
   const h = ['Ngày', 'Mã đơn hàng', 'Sản phẩm', 'Size', 'Màu', 'Đóng kèm', 'Nguồn', 'Trạng thái'];
@@ -661,6 +706,7 @@ function exportCSV() {
 
 /* ===== Sự kiện ===== */
 document.addEventListener('click', e => {
+  if (!e.target.closest('.more') || e.target.closest('.menu button, .menu a')) document.querySelectorAll('.more[open]').forEach(d => d.removeAttribute('open'));
   const t = e.target.closest('[data-tab],[data-st],[data-sv],[data-a],[data-quick]'); if (!t) return;
   const d = t.dataset;
   if (d.tab) { tab = d.tab; try { localStorage.setItem('tts-tab', tab); } catch { /* bỏ qua */ } return render(); }
@@ -688,6 +734,7 @@ document.addEventListener('click', e => {
     case 'close': return closeModal();
     case 'al-add': { const p = ADD.lines[ADD.lines.length - 1]; ADD.lines.push(newLine({ product: p.product, color: p.color, kem: p.kem, size: p.size })); return drawLines(); }
     case 'al-del': ADD.lines.splice(+d.i, 1); return drawLines();
+    case 'al-note': { ADD.lines[+d.i].showNote = true; drawLines(); const inp = document.querySelector(`.aline[data-i="${d.i}"] [data-k=note]`); if (inp) inp.focus(); return; }
     case 'edit': return editModal(d.g);
     case 'e-cancel': case 'e-reopen': {
       const l = EDIT.lines[+d.i], ops = [], o = S.orders.find(x => x.id === l.id);
@@ -702,6 +749,23 @@ document.addEventListener('click', e => {
       S.comments.push({ ts: Date.now(), who: ROLES[role], key: gg.id, text });
       save([{ t: 'comment', orderId: gg.id, text }]);
       return commentModal(d.g);
+    }
+    case 'bill': {
+      const R = currentBill(); toast('Đang tạo file…');
+      loadJs('export.js').then(() => Export.run(d.kind, d.fmt, R, { withList: F.billList !== false })).then(nm => toast('Đã tải ' + nm)).catch(err => toast(err.message));
+      return;
+    }
+    case 'bill-list': F.billList = t.checked; return;
+    case 'close-month': {
+      const R = currentBill();
+      if (!confirm(`Chốt tháng ${R.month.slice(5)}/${R.month.slice(0, 4)}?\nShop: ${fmtM(R.totals.shop)}đ · đối tác: ${fmtM(R.totals.partner)}đ (${fmtM(R.totals.pairs)} đôi).\nSố liệu được lưu trong tab "Chốt tháng" của Google Sheet.`)) return;
+      save([{ t: 'month.close', month: R.month, pairs: R.totals.pairs, shop: R.totals.shop, partner: R.totals.partner, margin: R.totals.margin, detail: { days: R.days.map(x => ({ d: x.date, n: x.pairs, s: x.shopTotal, p: x.partnerTotal })), pricing: R.P } }]);
+      return toast('Đang chốt tháng…');
+    }
+    case 'pricing-save': {
+      const values = {}; document.querySelectorAll('[data-pr]').forEach(i => { values[i.dataset.pr] = i.value.trim(); });
+      S.pricing = { ...(S.pricing || {}), ...values };
+      save([{ t: 'pricing.save', values }]); return toast('Đã lưu bảng giá');
     }
     case 'csv': return exportCSV();
     case 'new-stock': return newStockModal();
@@ -788,6 +852,7 @@ document.addEventListener('input', e => {
   const pos = el.selectionStart; render();   // gõ tìm kiếm: giữ con trỏ trong ô nhập
   const i = document.querySelector(`[data-f="${f}"]`); if (i) { i.focus(); i.setSelectionRange(pos, pos); }
 });
+document.addEventListener('toggle', e => { if (e.target.id === 'stock-info') F.stockInfoOpen = e.target.open; }, true);
 document.addEventListener('change', e => {
   const t = e.target.dataset && e.target.dataset.tick;
   if (t) { e.target.checked ? TICKS.add(t) : TICKS.delete(t); }

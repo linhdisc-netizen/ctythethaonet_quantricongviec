@@ -14,6 +14,28 @@ const SHEET_ID = '';   // ID của Google Sheet: đoạn giữa /d/ và /edit tr
 
 const TAB = { ORD: 'Đơn hàng', STK: 'Tồn kho', CMT: 'Bình luận', LOG: 'Nhật ký', CAT: 'Danh mục', CHK: 'Kiểm kho' };
 const CHK_HEADER = ['Thời gian', 'Người kiểm', 'Sản phẩm', 'Size', 'Màu', 'Sổ sách', 'Thực tế', 'Chênh lệch', 'Xử lý'];
+// Chốt tháng (chỉ vai trò Chủ): bảng giá và số liệu đã chốt
+TAB.PRC = 'Bảng giá'; TAB.CLS = 'Chốt tháng';
+const PRC_HEADER = ['Mô tả', 'Giá trị', 'Mã'];
+const CLS_HEADER = ['Tháng', 'Người chốt', 'Thời gian chốt', 'Số đôi tính phí', 'Tiền Shop', 'Tiền đối tác', 'Chênh lệch', 'Chi tiết (JSON)'];
+const PRC_DEFAULTS = [
+  ['Tên bên nhận bảng phí (Shop)', 'A Tính', 'shop_name'],
+  ['Tên bên nhận thanh toán (kho / đối tác)', 'Chị Thương và Anh', 'partner_name'],
+  ['Người lập bảng', 'Linh', 'issuer'],
+  ['Shop: mức 1 - số đôi/ngày DƯỚI', 10, 'shop_t1_max'], ['Shop: mức 1 - đơn giá mỗi đôi (đ)', 10000, 'shop_t1_price'],
+  ['Shop: mức 2 - số đôi/ngày DƯỚI', 30, 'shop_t2_max'], ['Shop: mức 2 - đơn giá mỗi đôi (đ)', 7000, 'shop_t2_price'],
+  ['Shop: mức 3 - số đôi/ngày DƯỚI', 50, 'shop_t3_max'], ['Shop: mức 3 - đơn giá mỗi đôi (đ)', 6000, 'shop_t3_price'],
+  ['Shop: mức 4 - số đôi/ngày DƯỚI', 100, 'shop_t4_max'], ['Shop: mức 4 - đơn giá mỗi đôi (đ)', 5000, 'shop_t4_price'],
+  ['Shop: từ mức 4 trở lên - đơn giá mỗi đôi (đ)', 5000, 'shop_t5_price'],
+  ['Tính riêng đơn nhiều đôi (Có / Không)', 'Có', 'bulk_on'],
+  ['Đơn nhiều đôi: là đơn có số đôi LỚN HƠN', 5, 'bulk_min'],
+  ['Shop: giá mỗi đôi trong đơn nhiều đôi (đ)', 5000, 'shop_bulk_price'],
+  ['Shop: đơn có số đôi LỚN HƠN (mức rất nhiều)', 10, 'shop_bulk_big_min'],
+  ['Shop: giá mỗi đôi trong đơn mức rất nhiều (đ)', 4000, 'shop_bulk_big_price'],
+  ['Đối tác: giá mỗi đôi, đơn thường (đ)', 5000, 'partner_price'],
+  ['Đối tác: giá mỗi đôi trong đơn nhiều đôi (đ)', 2500, 'partner_bulk_price'],
+  ['Tính phí cả đôi đã hoàn về kho (Có / Không)', 'Có', 'count_returned'],
+];
 const ORD = { id: 'ID', date: 'Ngày', product: 'Sản phẩm', size: 'Size', color: 'Màu', code: 'Mã đơn', kem: 'Đóng kèm', src: 'Nguồn', st: 'Trạng thái', by: 'Người tạo', upd: 'Cập nhật lúc', note: 'Ghi chú' };
 const STK = { id: 'ID', date: 'Ngày nhập', type: 'Loại', product: 'Sản phẩm', size: 'Size', color: 'Màu', ref: 'Mã đơn hoàn', st: 'Tình trạng', used: 'Ngày dùng', forOrder: 'Dùng cho đơn (ID)', note: 'Ghi chú' };
 const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng', 'Đã hủy', 'Đã hoàn'];
@@ -131,6 +153,23 @@ function readLog(name, max) {
   for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, 4).map(norm));
   return out;
 }
+function pricingTable() {
+  const ss = book();
+  if (!ss.getSheetByName(TAB.PRC)) {
+    const sh = ss.insertSheet(TAB.PRC, ss.getNumSheets()); sh.appendRow(PRC_HEADER); sh.setFrozenRows(1);
+    sh.getRange(2, 1, PRC_DEFAULTS.length, 3).setValues(PRC_DEFAULTS);
+  }
+  const t = table(TAB.PRC, null, PRC_HEADER);
+  const have = {}; for (let r = 1; r < t.vals.length; r++) have[String(t.vals[r][2]).trim()] = true;
+  const miss = PRC_DEFAULTS.filter(d => !have[d[2]]);                   // thêm mục mới nếu bản sau có thêm thông số
+  if (miss.length) { t.sh.getRange(t.vals.length + 1, 1, miss.length, 3).setValues(miss); miss.forEach(m => t.vals.push(m)); }
+  return t;
+}
+function readPricing() {
+  const t = pricingTable(), m = {};
+  for (let r = 1; r < t.vals.length; r++) { const k = String(t.vals[r][2]).trim(); if (k) m[k] = t.vals[r][1]; }
+  return m;
+}
 function readTabN(name, header, max) {
   const t = table(name, null, header), out = [];
   for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, header.length).map(norm));
@@ -187,7 +226,9 @@ function load(role) {
   const orders = [], stock = [];
   for (let r = 1; r < o.vals.length; r++) if (String(cellOf(o, r, ORD.id)).trim() !== '') orders.push(rowObj(o, ORD, r));
   for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.id)).trim() !== '') stock.push(rowObj(s, STK, r));
-  return { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000), checks: readTabN(TAB.CHK, CHK_HEADER, 400) };
+  const res = { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000), checks: readTabN(TAB.CHK, CHK_HEADER, 400) };
+  if (role === 'chu') { res.pricing = readPricing(); res.closes = readTabN(TAB.CLS, CLS_HEADER, 120); }   // giá và tiền chỉ trả về cho Chủ
+  return res;
 }
 
 /* ---------- Ghi ---------- */
@@ -403,6 +444,30 @@ function write(p, role) {
         chkRows.push([nowD, ROLE_NAME[role], '(Chốt kiểm kho)', '', '', bookAll, '', net, 'Đã kiểm ' + counted + ' mẫu, lệch ' + off + ' mẫu']);
         log('KIEMKHO', 'Chốt kiểm kho: đã kiểm ' + counted + ' mẫu, lệch ' + off + ' mẫu');
         return results.push({ ok: true, counted: counted, off: off });
+      }
+      if (op.t === 'pricing.save') {
+        if (role !== 'chu') return results.push(fail('Chỉ Chủ được sửa bảng giá'));
+        const t = pricingTable(), idx = {};
+        for (let r = 1; r < t.vals.length; r++) idx[String(t.vals[r][2]).trim()] = r;
+        let k = 0;
+        Object.keys(op.values || {}).forEach(key => {
+          if (idx[key] === undefined) return;
+          let v = op.values[key];
+          if (typeof v === 'number' && !(v >= 0)) return;
+          t.sh.getRange(idx[key] + 1, 2).setValue(v); k++;
+        });
+        log('BANGGIA', 'Cập nhật bảng giá: ' + k + ' mục');
+        return results.push({ ok: true, count: k });
+      }
+      if (op.t === 'month.close') {
+        if (role !== 'chu') return results.push(fail('Chỉ Chủ được chốt tháng'));
+        if (!/^\d{4}-\d\d$/.test(String(op.month))) return results.push(fail('Tháng không hợp lệ'));
+        const t = table(TAB.CLS, null, CLS_HEADER), start = t.vals.length + 1;
+        t.sh.getRange(start, 1).setNumberFormat('@');
+        t.sh.getRange(start, 1, 1, 8).setValues([[String(op.month), ROLE_NAME[role], nowD, +op.pairs || 0, +op.shop || 0, +op.partner || 0, +op.margin || 0, JSON.stringify(op.detail || {}).slice(0, 45000)]]);
+        t.sh.getRange(start, 3).setNumberFormat('dd/mm/yyyy hh:mm');
+        log('CHOTTHANG', 'Chốt tháng ' + op.month + ': Shop ' + (+op.shop || 0) + ', đối tác ' + (+op.partner || 0));
+        return results.push({ ok: true });
       }
       if (op.t === 'comment') {
         if (!oIdx[op.orderId]) return results.push(fail('Không thấy đơn'));
