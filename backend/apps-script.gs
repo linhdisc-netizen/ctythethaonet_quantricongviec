@@ -12,10 +12,11 @@
 const PASSWORDS = { shop: '__PW_SHOP__', kho: '__PW_KHO__', chu: '__PW_CHU__' };
 const SHEET_ID = '';   // ID của Google Sheet: đoạn giữa /d/ và /edit trong link của Sheet
 
-const TAB = { ORD: 'Đơn hàng', STK: 'Tồn kho', CMT: 'Bình luận', LOG: 'Nhật ký', CAT: 'Danh mục' };
+const TAB = { ORD: 'Đơn hàng', STK: 'Tồn kho', CMT: 'Bình luận', LOG: 'Nhật ký', CAT: 'Danh mục', CHK: 'Kiểm kho' };
+const CHK_HEADER = ['Thời gian', 'Người kiểm', 'Sản phẩm', 'Size', 'Màu', 'Sổ sách', 'Thực tế', 'Chênh lệch', 'Xử lý'];
 const ORD = { id: 'ID', date: 'Ngày', product: 'Sản phẩm', size: 'Size', color: 'Màu', code: 'Mã đơn', kem: 'Đóng kèm', src: 'Nguồn', st: 'Trạng thái', by: 'Người tạo', upd: 'Cập nhật lúc', note: 'Ghi chú' };
 const STK = { id: 'ID', date: 'Ngày nhập', type: 'Loại', product: 'Sản phẩm', size: 'Size', color: 'Màu', ref: 'Mã đơn hoàn', st: 'Tình trạng', used: 'Ngày dùng', forOrder: 'Dùng cho đơn (ID)', note: 'Ghi chú' };
-const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng', 'Đã hủy'];
+const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng', 'Đã hủy', 'Đã hoàn'];
 const ROLE_NAME = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
 
 /* ---------- Điểm vào ---------- */
@@ -130,6 +131,11 @@ function readLog(name, max) {
   for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, 4).map(norm));
   return out;
 }
+function readTabN(name, header, max) {
+  const t = table(name, null, header), out = [];
+  for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, header.length).map(norm));
+  return out;
+}
 // Sheet tạo từ file Excel bản đầu: (1) thiếu trạng thái "Đã hủy", (2) cột Sản phẩm chặn không cho gõ tên ngoài danh sách.
 // Hai việc này tự bổ sung một lần (có đánh dấu để không lặp lại); lỗi thì bỏ qua, không ảnh hưởng chạy.
 function ensureSetup(o) {
@@ -153,6 +159,25 @@ function ensureSetup(o) {
       props.setProperty('prodWarnOnly', '1');
     }
   } catch (err) { /* bỏ qua */ }
+  try {
+    // Bản 3: trạng thái "Đã hoàn", loại tồn "Nhập mới", tình trạng tồn "Lỗi" / "Thất thoát"
+    const props = PropertiesService.getScriptProperties();
+    const cat = book().getSheetByName(TAB.CAT);
+    if (cat && !props.getProperty('setupV3')) {
+      const put = (a1, v) => { const c = cat.getRange(a1); if (String(c.getValue()).trim() === '') c.setValue(v); };
+      put('E6', 'Đã hủy'); put('E7', 'Đã hoàn'); put('G4', 'Nhập mới'); put('H4', 'Lỗi'); put('H5', 'Thất thoát');
+      const list = arr => SpreadsheetApp.newDataValidation().requireValueInList(arr, true).setAllowInvalid(false).build();
+      if (o.h[ORD.st]) o.sh.getRange(2, o.h[ORD.st], 3000, 1).setDataValidation(list(STATUSES));
+      const st = book().getSheetByName(TAB.STK);
+      if (st) {
+        const hd = st.getRange(1, 1, 1, Math.max(st.getLastColumn(), 1)).getValues()[0];
+        const ti = hd.indexOf(STK.type), si = hd.indexOf(STK.st);
+        if (ti >= 0) st.getRange(2, ti + 1, 3000, 1).setDataValidation(list(['Hàng hoàn', 'Hàng lấy dư', 'Nhập mới']));
+        if (si >= 0) st.getRange(2, si + 1, 3000, 1).setDataValidation(list(['Còn hàng', 'Đã dùng', 'Lỗi', 'Thất thoát']));
+      }
+      props.setProperty('setupV3', '1');
+    }
+  } catch (err) { /* bỏ qua */ }
 }
 function load(role) {
   const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
@@ -162,7 +187,7 @@ function load(role) {
   const orders = [], stock = [];
   for (let r = 1; r < o.vals.length; r++) if (String(cellOf(o, r, ORD.id)).trim() !== '') orders.push(rowObj(o, ORD, r));
   for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.id)).trim() !== '') stock.push(rowObj(s, STK, r));
-  return { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000) };
+  return { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000), checks: readTabN(TAB.CHK, CHK_HEADER, 400) };
 }
 
 /* ---------- Ghi ---------- */
@@ -186,7 +211,7 @@ function write(p, role) {
   const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
   const oIdx = indexById(o), sIdx = indexById(s);
   const newOrderId = nextId(o, 'D'), newStockId = nextId(s, 'T');
-  const logRows = [], cmtRows = [], results = [];
+  const logRows = [], cmtRows = [], chkRows = [], results = [];
   const now = nowStr(), nowD = Utilities.parseDate(now, tz(), "yyyy-MM-dd'T'HH:mm:ss");
   const log = (target, text) => logRows.push([nowD, ROLE_NAME[role], target, String(text).slice(0, 500)]);
   const fail = msg => ({ ok: false, error: msg });
@@ -232,6 +257,8 @@ function write(p, role) {
         if (STATUSES.indexOf(op.status) < 0) return results.push(fail('Trạng thái không hợp lệ'));
         const cur = String(cellOf(o, r, ORD.st));
         if (op.from && cur !== op.from) return results.push({ ok: false, conflict: true, current: cur });
+        if (op.status === 'Đã hoàn') return results.push(fail('Dùng mục "Trả hàng về" trong tab Tồn kho để nhập hàng hoàn'));
+        if (cur === 'Đã hoàn') return results.push(fail('Đơn này đã hoàn về kho. Muốn nhập nhầm thì hoàn tác ở tab Tồn kho.'));
         if (role === 'shop' && ['Đã giao', 'Chờ đóng', 'Đã hủy'].indexOf(op.status) < 0) return results.push(fail('Shop không được đổi sang trạng thái này'));
         if (role === 'kho' && op.status === 'Đã hủy') return results.push(fail('Kho không được hủy đơn'));
         if (op.status === 'Đã hủy' && role !== 'chu' && cur !== 'Chờ đóng' && cur !== 'Không có hàng') return results.push(fail('Đơn đã đóng hoặc đã giao nên không hủy được. Nhờ Kho hoàn tác trước.'));
@@ -292,6 +319,91 @@ function write(p, role) {
         }
         return results.push({ ok: true });
       }
+      if (op.t === 'stock.addGrid') {
+        if (role === 'shop') return results.push(fail('Shop không được nhập kho'));
+        const rows = [], ids = [];
+        (op.items || []).forEach(it => {
+          const k = Math.min(Math.max(+it.n || 0, 0), 100);
+          for (let i = 0; i < k && ids.length < 300; i++) {
+            const id = newStockId(); ids.push(id);
+            const row = {}; row[STK.id] = id; row[STK.date] = toDate(op.date) || toDate(todayStr()); row[STK.type] = 'Nhập mới';
+            row[STK.product] = op.product; row[STK.size] = +it.size || it.size; row[STK.color] = op.color; row[STK.ref] = ''; row[STK.st] = 'Còn hàng'; row[STK.note] = op.note || '';
+            rows.push(row);
+          }
+        });
+        if (!rows.length) return results.push(fail('Chưa nhập số lượng nào'));
+        appendRows(s, rows, [STK.ref]); ids.forEach((id, i) => { sIdx[id] = s.vals.length - ids.length + i; });
+        log(ids[0], 'Nhập hàng mới ' + ids.length + ' đôi ' + op.product + ' ' + op.color + (op.note ? ' (' + op.note + ')' : ''));
+        return results.push({ ok: true, count: ids.length });
+      }
+      if (op.t === 'return.add') {
+        if (role === 'shop') return results.push(fail('Shop không được nhập hàng hoàn'));
+        const r = oIdx[op.orderId];
+        if (!r) return results.push(fail('Không thấy đơn ' + op.orderId));
+        const cur = String(cellOf(o, r, ORD.st));
+        if (cur !== 'Đã giao' && cur !== 'Đã đóng') return results.push(fail('Đơn này đang ở trạng thái "' + cur + '", chưa thể nhập hàng hoàn'));
+        const bad = op.cond === 'loi';
+        setCell(o, r, ORD.st, 'Đã hoàn'); touch(r);
+        const id = newStockId();
+        const row = {}; row[STK.id] = id; row[STK.date] = toDate(todayStr()); row[STK.type] = 'Hàng hoàn';
+        row[STK.product] = cellOf(o, r, ORD.product); row[STK.size] = cellOf(o, r, ORD.size); row[STK.color] = cellOf(o, r, ORD.color);
+        row[STK.ref] = String(cellOf(o, r, ORD.code) || ''); row[STK.st] = bad ? 'Lỗi' : 'Còn hàng';
+        row[STK.note] = 'Hoàn từ đơn ' + op.orderId + (bad ? ' (lỗi)' : '');
+        appendRows(s, [row], [STK.ref]); sIdx[id] = s.vals.length - 1;
+        log(op.orderId, cur + ' → Đã hoàn'); log(id, 'Nhập hàng hoàn từ đơn ' + op.orderId + (bad ? ' (lỗi)' : ''));
+        return results.push({ ok: true, id: id });
+      }
+      if (op.t === 'return.undo') {
+        if (role === 'shop') return results.push(fail('Shop không được hoàn tác nhập hoàn'));
+        const sr = sIdx[op.id];
+        if (!sr) return results.push(fail('Không thấy dòng tồn ' + op.id));
+        const m = /Hoàn từ đơn (D\d+)/.exec(String(cellOf(s, sr, STK.note)));
+        const st = String(cellOf(s, sr, STK.st));
+        if (!m) return results.push(fail('Dòng này không phải hàng hoàn nhập từ mã đơn'));
+        if (st !== 'Còn hàng' && st !== 'Lỗi') return results.push(fail('Đôi này đã được dùng hoặc xử lý, không hoàn tác được'));
+        const r2 = oIdx[m[1]];
+        if (r2 && String(cellOf(o, r2, ORD.st)) === 'Đã hoàn') { setCell(o, r2, ORD.st, 'Đã giao'); touch(r2); log(m[1], 'Đã hoàn → Đã giao (hoàn tác nhập hoàn)'); }
+        setCell(s, sr, STK.st, 'Thất thoát'); setCell(s, sr, STK.note, String(cellOf(s, sr, STK.note)) + ' | Nhập nhầm, đã hoàn tác');
+        log(op.id, 'Hoàn tác nhập hoàn');
+        return results.push({ ok: true });
+      }
+      if (op.t === 'stocktake.save') {
+        if (role === 'shop') return results.push(fail('Shop không được kiểm kho'));
+        const dstr = fmt(nowD, 'dd/MM');
+        let counted = 0, off = 0, bookAll = 0, net = 0;
+        const add = [];
+        for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.id)).trim() !== '' && cellOf(s, r, STK.st) === 'Còn hàng') bookAll++;
+        (op.rows || []).forEach(x => {
+          const actual = Math.floor(+x.actual);
+          if (!(actual >= 0)) return;
+          const sz = String(x.size).trim(), pr = String(x.product).trim().toLowerCase(), cl = String(x.color).trim().toLowerCase();
+          const avail = [];
+          for (let r = 1; r < s.vals.length; r++) {
+            if (cellOf(s, r, STK.st) !== 'Còn hàng') continue;
+            if (String(cellOf(s, r, STK.product)).trim().toLowerCase() === pr && String(cellOf(s, r, STK.size)).trim() === sz && String(cellOf(s, r, STK.color)).trim().toLowerCase() === cl) avail.push(r);
+          }
+          avail.sort((a, b) => String(norm(cellOf(s, a, STK.date))).localeCompare(String(norm(cellOf(s, b, STK.date)))));
+          const bk = avail.length, diff = actual - bk;
+          let action = 'Khớp'; counted++;
+          if (diff < 0) {
+            avail.slice(0, -diff).forEach(r => { setCell(s, r, STK.st, 'Thất thoát'); const old = String(cellOf(s, r, STK.note)); setCell(s, r, STK.note, (old ? old + ' | ' : '') + 'Kiểm kho ' + dstr + ': thiếu'); });
+            action = 'Thiếu ' + (-diff) + ' đôi → đánh dấu Thất thoát'; off++;
+          } else if (diff > 0) {
+            for (let i = 0; i < Math.min(diff, 100); i++) {
+              const id = newStockId(), row = {};
+              row[STK.id] = id; row[STK.date] = toDate(todayStr()); row[STK.type] = 'Nhập mới'; row[STK.product] = x.product; row[STK.size] = +sz || sz; row[STK.color] = x.color; row[STK.ref] = ''; row[STK.st] = 'Còn hàng'; row[STK.note] = 'Thêm từ kiểm kho ' + dstr;
+              add.push(row);
+            }
+            action = 'Thừa ' + diff + ' đôi → thêm vào kho'; off++;
+          }
+          net += diff;
+          chkRows.push([nowD, ROLE_NAME[role], x.product, +sz || sz, x.color, bk, actual, diff, action]);
+        });
+        if (add.length) appendRows(s, add, [STK.ref]);
+        chkRows.push([nowD, ROLE_NAME[role], '(Chốt kiểm kho)', '', '', bookAll, '', net, 'Đã kiểm ' + counted + ' mẫu, lệch ' + off + ' mẫu']);
+        log('KIEMKHO', 'Chốt kiểm kho: đã kiểm ' + counted + ' mẫu, lệch ' + off + ' mẫu');
+        return results.push({ ok: true, counted: counted, off: off });
+      }
       if (op.t === 'comment') {
         if (!oIdx[op.orderId]) return results.push(fail('Không thấy đơn'));
         cmtRows.push([nowD, ROLE_NAME[role], op.orderId, String(op.text || '').slice(0, 2000)]);
@@ -308,6 +420,11 @@ function write(p, role) {
     t.sh.getRange(start, 1, rows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm:ss');
   };
   if (touched) o.sh.getRange(2, o.h[ORD.upd], Math.max(o.vals.length - 1, 1), 1).setNumberFormat('dd/mm/yyyy hh:mm');
+  if (chkRows.length) {
+    const t = table(TAB.CHK, null, CHK_HEADER), start = t.vals.length + 1;
+    t.sh.getRange(start, 1, chkRows.length, CHK_HEADER.length).setValues(chkRows);
+    t.sh.getRange(start, 1, chkRows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+  }
   appendTab(TAB.CMT, ['Thời gian', 'Vai trò', 'ID đơn', 'Nội dung'], cmtRows);
   appendTab(TAB.LOG, ['Thời gian', 'Vai trò', 'Đối tượng', 'Nội dung'], logRows);
   SpreadsheetApp.flush();

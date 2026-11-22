@@ -14,7 +14,8 @@ Trình duyệt (GitHub Pages)  ──mật khẩu──►  Apps Script (backend
 | Tab | Nội dung |
 |---|---|
 | Đơn hàng | Một dòng một đơn, **mọi tháng chung một tab**. Có cột ID cố định (D000001…), Trạng thái, Nguồn, Người tạo, Cập nhật lúc |
-| Tồn kho | Hàng hoàn và hàng lấy dư (ID T000001…), tình trạng Còn hàng / Đã dùng, dùng cho đơn nào |
+| Tồn kho | Một dòng một đôi (ID T000001…). Loại: Hàng hoàn / Hàng lấy dư / Nhập mới. Tình trạng: Còn hàng / Đã dùng / Lỗi / Thất thoát |
+| Kiểm kho | Do app ghi: mỗi lần kiểm kho (sổ sách, thực tế, chênh lệch, xử lý) |
 | Danh mục | Danh sách chọn: sản phẩm, size, màu, đóng kèm |
 | Bình luận, Nhật ký | Do app ghi: ai nói gì, ai đổi gì, lúc nào |
 | Tổng quan, Hướng dẫn | Số liệu tự tính và hướng dẫn dùng file |
@@ -43,6 +44,11 @@ Sửa `config.js`: `window.APP_CONFIG = { api: 'URL-vừa-copy' };` rồi commit
 
 ### 4. Bật GitHub Pages
 Repo → **Settings → Pages**: *Source* = **Deploy from a branch**, *Branch* = **main** / **(root)** → Save.
+
+## Tồn kho (Kho và Chủ)
+- **Nhập hàng mới (không bắt buộc):** chọn sản phẩm và màu một lần, rồi gõ số đôi vào **lưới size** (36–45 và ô size khác). Tạo đủ số dòng tồn, loại "Nhập mới".
+- **Trả hàng về:** nhập hoặc **quét mã đơn** trả về rồi Enter (có thể dán nhiều mã). App tự điền mẫu, size, màu từ đơn. Kho tick đôi nào được trả về và chọn **Tốt / Lỗi**. Đôi Tốt vào kho (dùng lại được), đôi Lỗi không tính còn hàng. Đơn gốc đổi sang **Đã hoàn** (trả một phần thì chỉ đôi đó hoàn). Chỉ đơn Đã giao / Đã đóng mới nhập hoàn được. Nhập nhầm thì bấm **Hoàn tác nhập**. Không có mã đơn thì dùng **Nhập tay**.
+- **Kiểm kho hàng tháng:** bấm **Kiểm kho**, app liệt kê tồn theo mẫu (sổ sách). Chỉ gõ số đếm thực tế ở mẫu đã đếm; thiếu thì đánh dấu **Thất thoát**, thừa thì thêm vào kho, có thể thêm mẫu ngoài sổ. Kết quả lưu ở tab **Kiểm kho**; từ ngày 25 hàng tháng app nhắc nếu chưa kiểm. Tổng quan có thêm số đôi đã hoàn và tỷ lệ hoàn.
 
 ## Đơn nhiều đôi (kiện)
 - Mỗi dòng trong tab Đơn hàng là **một đôi**. Các dòng có **cùng Mã đơn** được app gom thành **một đơn** (kiện). Khi nhập tay trong Sheet, hãy ghi cùng mã ở mọi dòng, đừng gộp ô.

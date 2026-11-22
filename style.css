@@ -96,3 +96,14 @@ details.card summary{cursor:pointer}
 .srcrow label{white-space:nowrap}
 .sugg label{display:flex;gap:6px;align-items:flex-start}
 .tag:empty{display:none}
+/* ---- tồn kho: nhập lưới size, trả hàng, kiểm kho ---- */
+.b-hoan{background:var(--warnbg);color:var(--warn)}
+.sizegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:8px}
+.sz{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+.sz input{width:100%}
+.sz.wide2{grid-column:span 3}
+.two{display:flex;gap:6px}.two input{flex:1;min-width:0}
+.stackf{display:flex;flex-direction:column;gap:6px}
+.stackf select,.stackf input{width:100%}
+.ckin{width:90px}
+@media(max-width:640px){.sz.wide2{grid-column:1/-1}}

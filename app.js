@@ -8,7 +8,7 @@ let PRODUCTS = ['Nagaki Karyu', 'Nagaki Kakashi', 'Nagaki Katashi', 'Nagaki Nekk
 let SIZES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
 let BASE_COLORS = ['xanh rêu', 'xanh ngọc', 'trắng đỏ', 'trắng', 'xanh đen', 'xanh bích', 'vàng', 'navy', 'đen', 'trắng đồng', 'cam'];
 let KEMS = ['', 'bó gối', 'tất'];
-const ST = { moi: 'Chờ đóng', da_dong: 'Đã đóng', da_giao: 'Đã giao', khong_co: 'Không có hàng', huy: 'Đã hủy' };
+const ST = { moi: 'Chờ đóng', da_dong: 'Đã đóng', da_giao: 'Đã giao', khong_co: 'Không có hàng', hoan: 'Đã hoàn', huy: 'Đã hủy' };
 const ST_TO_CODE = Object.fromEntries(Object.entries(ST).map(([k, v]) => [v, k]));
 const ROLES = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
 const TABS = [['orders', 'Đơn hàng'], ['pack', 'Cần đóng'], ['stock', 'Tồn kho'], ['dash', 'Tổng quan']];
@@ -54,11 +54,13 @@ function build(d) {
     kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
   })).filter(o => o.product);
   S.stock = d.stock.map(x => ({
-    id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
-    ref: String(x.ref || ''), used: x.st === 'Đã dùng', usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''),
+    id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : x.type === 'Nhập mới' ? 'moi' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
+    ref: String(x.ref || ''), state: x.st === 'Đã dùng' ? 'used' : x.st === 'Lỗi' ? 'loi' : x.st === 'Thất thoát' ? 'mat' : 'con', used: x.st === 'Đã dùng',
+    usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''), note: String(x.note || '').trim(),
   })).filter(x => x.product);
   S.comments = d.comments.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
   S.log = d.log.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
+  S.checks = (d.checks || []).map(([ts, who, p, sz, c, book, act, diff, action]) => ({ ts: Date.parse(ts) || 0, who, p: String(p), sz: String(sz), c: String(c), book, act, diff, action: String(action || '') }));
 }
 // Gom các dòng cùng Mã đơn thành kiện. Dòng chưa có mã thì tự là một kiện riêng.
 function buildGroups() {
@@ -68,8 +70,9 @@ function buildGroups() {
     items.sort((a, b) => a.id.localeCompare(b.id));
     const act = items.filter(i => i.status !== 'huy');
     const g = { id: items[0].id, code: items[0].code, date: items.map(i => i.date).sort()[0], items, active: act };
-    g.status = !act.length ? 'huy' : act.every(i => i.status === act[0].status) ? act[0].status
-      : act.some(i => i.status === 'khong_co') ? 'khong_co' : act.some(i => i.status === 'moi') ? 'moi' : 'da_dong';
+    const live = act.filter(i => i.status !== 'hoan');      // đôi đã hoàn về kho không tính vào trạng thái chung
+    g.status = !act.length ? 'huy' : !live.length ? 'hoan' : live.every(i => i.status === live[0].status) ? live[0].status
+      : live.some(i => i.status === 'khong_co') ? 'khong_co' : live.some(i => i.status === 'moi') ? 'moi' : 'da_dong';
         return g;
   }).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 }
@@ -131,7 +134,7 @@ $('#logout').onclick = () => logout();
 
 /* ===== Nghiệp vụ ===== */
 const can = (...r) => r.includes(role) || role === 'chu';
-const availStock = () => S.stock.filter(s => !s.used);
+const availStock = () => S.stock.filter(s => s.state === 'con');
 const matches = o => availStock().filter(s => key(s) === key(o));
 const colorList = () => [...new Set([...BASE_COLORS, ...S.orders.map(o => o.color), ...S.stock.map(s => s.color)].filter(Boolean))];
 
@@ -139,7 +142,7 @@ const colorList = () => [...new Set([...BASE_COLORS, ...S.orders.map(o => o.colo
 function changeStatus(o, st, ops) {
   ops.push({ t: 'order.status', id: o.id, status: ST[st], from: ST[o.status] });
   if ((st === 'moi' && o.status !== 'khong_co') || st === 'huy') {
-    S.stock.filter(x => x.usedBy === o.id && x.used).forEach(x => { x.used = false; x.usedDate = ''; x.usedBy = ''; });
+    S.stock.filter(x => x.usedBy === o.id && x.used).forEach(x => { x.used = false; x.state = 'con'; x.usedDate = ''; x.usedBy = ''; });
     o.fromStock = false;
   }
   o.status = st;
@@ -181,7 +184,7 @@ function render() {
 const badge = s => `<span class="badge b-${s}">${ST[s]}</span>`;
 const opts = (arr, sel) => arr.map(v => `<option ${String(v) === String(sel) ? 'selected' : ''}>${esc(v)}</option>`).join('');
 function modal(html) { const m = $('#modal'); m.innerHTML = `<div class="mbox">${html}</div>`; m.hidden = false; }
-function closeModal() { $('#modal').hidden = true; render(); }
+function closeModal() { $('#modal').hidden = true; NG = RET = CK = null; render(); }
 const itemTags = i => `${i.kem ? `<span class="tag">${esc(i.kem)}</span>` : ''}${i.fromStock ? '<span class="tag stock">hàng tồn</span>' : ''}`;
 
 /* ===== Đơn hàng (theo kiện) ===== */
@@ -216,7 +219,7 @@ function vOrders() {
     <td class="code">${esc(g.code) || '<span class="mut">—</span>'}${g.active.length > 1 ? `<div><span class="tag">${g.active.length} đôi</span></div>` : ''}</td>
     <td>${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
       ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</td>
-    <td>${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}</td>
+    <td>${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${g.active.some(i => i.status === 'hoan') && g.status !== 'hoan' ? `<div class="mut">${g.active.filter(i => i.status === 'hoan').length} đôi đã hoàn</div>` : ''}</td>
     <td><div class="acts">${groupButtons(g)}</div></td>
     <td class="nw"><button class="btn sm" data-a="cm" data-g="${g.id}">💬${nc ? ' ' + nc : ''}</button>${can('shop') && (g.status !== 'da_giao' || role === 'chu') ? ` <button class="btn sm" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</td></tr>`;
   }).join('') || '<tr><td colspan="6" class="mut">Không có đơn nào.</td></tr>'}
@@ -294,7 +297,7 @@ function updSum() {
 // Thêm nhiều dòng trong một lần ghi. items: [{d, stock}]
 function addOrders(items) {
   const ops = items.map(({ d, stock }) => {
-    if (stock) { stock.used = true; stock.usedDate = today(); }
+    if (stock) { stock.used = true; stock.state = 'used'; stock.usedDate = today(); }
     return { t: 'order.add', date: d.date || today(), product: d.product, size: d.size, color: cap(normColor(d.color)), code: d.code || '', kem: String(d.kem || '').trim(), note: String(d.note || '').trim(), stockId: stock ? stock.id : undefined };
   });
   return save(ops);
@@ -443,31 +446,165 @@ function vPack() {
 }
 
 /* ===== Tồn kho ===== */
-function vStock() {
-  const av = availStock(), q = F.stockQ.toLowerCase();
-  const piv = {}; av.forEach(s => piv[key(s)] = (piv[key(s)] || 0) + 1);
-  const rows = S.stock.filter(s => (F.stockView === 'all' || (F.stockView === 'con') === !s.used) && (!q || lineText(s).toLowerCase().includes(q) || (s.ref || '').includes(q)))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
-  $('#main').innerHTML = `<div class="bar"><div class="chips">
-    ${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + (S.stock.length - av.length)], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${F.stockView === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
-    <input data-f="stockQ" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}"><span class="sp"></span>
-    ${can('kho') ? '<button class="btn pri" data-a="new-stock">+ Nhập hàng hoàn / dư</button>' : ''}</div>
-  <div class="card"><b>Tồn hiện có theo mẫu</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-    ${Object.entries(piv).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<span class="tag stock">${esc(p)} · ${s} · ${esc(cap(c))} × ${n}</span>`; }).join('') || '<span class="mut">Kho trống</span>'}</div></div>
-  <div class="wrap"><table class="tbl"><thead><tr><th>Ngày nhập</th><th>Loại</th><th>Mẫu</th><th>Mã đơn hoàn</th><th>Tình trạng</th><th></th></tr></thead><tbody>
-  ${rows.map(s => { const o = s.usedBy && S.orders.find(x => x.id === s.usedBy);
-    return `<tr><td>${fmtD(s.date)}</td><td>${s.type === 'hoan' ? 'Hàng hoàn' : 'Hàng lấy dư'}</td><td>${esc(lineText(s))}</td><td class="code">${esc(s.ref) || '—'}</td>
-    <td>${s.used ? `<span class="badge b-da_dong">Đã dùng ${fmtD(s.usedDate)}${o ? ' · ' + esc(o.code || 'đơn mới') : ''}</span>` : '<span class="badge b-da_giao">Còn hàng</span>'}</td>
-    <td><div class="acts">${can('kho', 'shop') ? (s.used ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>`) : ''}</div></td></tr>`; }).join('') || '<tr><td colspan="6" class="mut">Không có dòng nào.</td></tr>'}
-  </tbody></table></div>`;
+const TYPE_TXT = { hoan: 'Hàng hoàn', du: 'Hàng lấy dư', moi: 'Nhập mới' };
+function stockBadge(s) {
+  if (s.state === 'used') { const o = s.usedBy && S.orders.find(x => x.id === s.usedBy); return `<span class="badge b-da_dong">Đã dùng ${fmtD(s.usedDate)}${o ? ' · ' + esc(o.code || 'đơn mới') : ''}</span>`; }
+  if (s.state === 'loi') return '<span class="badge b-khong_co">Lỗi</span>';
+  if (s.state === 'mat') return '<span class="badge b-huy">Thất thoát</span>';
+  return '<span class="badge b-da_giao">Còn hàng</span>';
 }
-function newStockModal() {
-  modal(`<h3>Nhập hàng hoàn / lấy dư</h3>
+const lastCheck = () => (S.checks || []).filter(c => c.p === '(Chốt kiểm kho)').sort((a, b) => b.ts - a.ts)[0] || null;
+function vStock() {
+  const av = availStock(), q = F.stockQ.toLowerCase(), view = F.stockView;
+  const piv = {}; av.forEach(s => piv[key(s)] = (piv[key(s)] || 0) + 1);
+  const n = st => S.stock.filter(s => s.state === st).length;
+  const rows = S.stock.filter(s => (view === 'all' || (view === 'con' && s.state === 'con') || (view === 'used' && s.state === 'used') || (view === 'khac' && (s.state === 'loi' || s.state === 'mat')))
+    && (!q || lineText(s).toLowerCase().includes(q) || (s.ref || '').includes(q) || (s.note || '').toLowerCase().includes(q)))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
+  const lc = lastCheck(), thisMonth = lc && new Date(lc.ts).toLocaleDateString('sv').slice(0, 7) === today().slice(0, 7);
+  const remind = can('kho') && !thisMonth && new Date().getDate() >= 25;
+  const lastBatch = lc ? (S.checks || []).filter(c => Math.abs(c.ts - lc.ts) < 5000 && c.p !== '(Chốt kiểm kho)' && +c.diff !== 0) : [];
+  $('#main').innerHTML = `${remind ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
+  <div class="bar"><div class="chips">
+    ${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
+    <input data-f="stockQ" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}"><span class="sp"></span>
+    ${can('kho') ? '<button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button><button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn" data-a="check-open">☑ Kiểm kho</button>' : ''}</div>
+  <div class="card"><b>Tồn hiện có theo mẫu</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+    ${Object.entries(piv).sort().map(([k, c]) => { const [p, sz, cl] = k.split('|'); return `<span class="tag stock">${esc(p)} · ${esc(sz)} · ${esc(cap(cl))} × ${c}</span>`; }).join('') || '<span class="mut">Kho trống</span>'}</div>
+    ${lc ? `<div class="mut" style="margin-top:8px">Lần kiểm kho gần nhất: ${new Date(lc.ts).toLocaleDateString('vi-VN')} · ${esc(lc.who)} · ${esc(lc.action)}</div>` : '<div class="mut" style="margin-top:8px">Chưa có lần kiểm kho nào.</div>'}
+    ${lastBatch.length ? `<details style="margin-top:6px"><summary class="mut">Mẫu lệch ở lần kiểm gần nhất (${lastBatch.length})</summary><div class="mut code">${lastBatch.map(c => esc(`${c.p} · ${c.sz} · ${c.c}: sổ ${c.book} → thực tế ${c.act} (${c.diff > 0 ? '+' : ''}${c.diff})`)).join('<br>')}</div></details>` : ''}</div>
+  <div class="wrap"><table class="tbl"><thead><tr><th>Ngày nhập</th><th>Loại</th><th>Mẫu</th><th>Mã đơn hoàn</th><th>Tình trạng</th><th>Ghi chú</th><th></th></tr></thead><tbody>
+  ${rows.slice(0, 400).map(s => {
+    const undo = can('kho') && /Hoàn từ đơn D\d+/.test(s.note) && (s.state === 'con' || s.state === 'loi');
+    return `<tr><td>${fmtD(s.date)}</td><td>${TYPE_TXT[s.type]}</td><td>${esc(lineText(s))}</td><td class="code">${esc(s.ref) || '—'}</td><td>${stockBadge(s)}</td><td class="mut">${esc(s.note)}</td>
+    <td><div class="acts">${can('kho', 'shop') ? (s.state === 'used' ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : s.state === 'con' ? `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>` : '') : ''}${undo ? `<button class="btn sm bad" data-a="ret-undo" data-id="${s.id}" title="Nhập nhầm: bỏ dòng hoàn này và trả đơn về Đã giao">Hoàn tác nhập</button>` : ''}</div></td></tr>`; }).join('') || '<tr><td colspan="7" class="mut">Không có dòng nào.</td></tr>'}
+  </tbody></table></div>${rows.length > 400 ? `<p class="mut">Đang hiện 400/${rows.length} dòng – hãy lọc hoặc tìm kiếm.</p>` : ''}`;
+}
+
+/* --- Nhập hàng mới (lưới size) --- */
+let NG = null;
+function ngProdDraw() { $('#ng-prod').innerHTML = prodHtml(NG, 'data-ng') + prodOther(NG, 'data-ng'); }
+function ngItems() {
+  const it = [...document.querySelectorAll('[data-ngs]')].map(i => ({ size: i.dataset.ngs, n: Math.floor(+i.value) || 0 })).filter(x => x.n > 0);
+  const o = { size: ($('[data-ngo=size]').value || '').trim(), n: Math.floor(+$('[data-ngo=n]').value) || 0 };
+  if (o.size && o.n > 0) it.push(o);
+  return it;
+}
+function ngSum() { const t = ngItems().reduce((a, x) => a + x.n, 0); $('#ng-sum').innerHTML = `Tổng <b>${t}</b> đôi sẽ được thêm vào kho (tình trạng Còn hàng).`; }
+function newGoodsModal() {
+  NG = { product: PRODUCTS[0], custom: false };
+  modal(`<h3>Nhập hàng mới</h3>
+  <div class="fld"><label>Ngày</label><input type="date" id="ng-date" value="${today()}"></div>
+  <div class="fld"><label>Sản phẩm</label><div id="ng-prod" class="stackf"></div></div>
+  <div class="fld"><label>Màu</label><input id="ng-color" list="dl-color" placeholder="chọn hoặc gõ"></div>
+  <div class="fld"><label>Nguồn / ghi chú</label><input id="ng-note" placeholder="vd: nhập từ Thể Thao Net (tuỳ chọn)"></div>
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${sizeList()}
+  <div class="mut" style="margin:8px 0 4px">Số đôi theo size (để trống = 0):</div>
+  <div class="sizegrid">${SIZES.map(sz => `<label class="sz"><span>${esc(sz)}</span><input type="number" min="0" max="100" data-ngs="${esc(sz)}"></label>`).join('')}
+    <label class="sz wide2"><span>Size khác</span><div class="two"><input data-ngo="size" list="dl-size" placeholder="size"><input type="number" min="0" max="100" data-ngo="n" placeholder="số đôi"></div></label></div>
+  <div id="ng-sum" class="sum"></div>
+  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="ng-save">Lưu vào kho</button></div>`);
+  ngProdDraw(); ngSum();
+}
+function ngSave() {
+  const color = normColor($('#ng-color').value), prod = canon(NG.product), items = ngItems();
+  if (!prod) return toast('Chọn hoặc gõ tên sản phẩm');
+  if (!color) return toast('Chọn màu trước nhé');
+  if (!items.length) return toast('Nhập số đôi ở ít nhất một size');
+  const total = items.reduce((a, x) => a + x.n, 0);
+  save([{ t: 'stock.addGrid', date: $('#ng-date').value || today(), product: prod, color: cap(color), note: $('#ng-note').value.trim(), items }]);
+  closeModal(); toast(`Đang nhập ${total} đôi vào kho…`);
+}
+
+/* --- Trả hàng về (nhập theo mã đơn) --- */
+let RET = null;
+const retEligible = o => o.status === 'da_giao' || o.status === 'da_dong';
+function returnModal() {
+  RET = { items: [], missing: [] };
+  modal(`<h3>Trả hàng về</h3>
+  <p class="mut">Nhập hoặc quét <b>mã đơn hàng trả về</b> rồi nhấn Enter. Có thể dán nhiều mã (mỗi mã một dòng). App tự điền mẫu, size, màu từ đơn.</p>
+  <textarea id="rt-code" rows="2" inputmode="numeric" placeholder="Mã đơn hoàn…"></textarea>
+  <div class="row" style="justify-content:flex-start;margin:6px 0"><button class="btn sm" data-a="rt-add">Thêm mã</button><button class="btn sm" data-a="rt-manual">Không có mã đơn? Nhập tay</button></div>
+  <div id="rt-list"></div>
+  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="rt-save">Lưu hàng hoàn</button></div>`);
+  $('#rt-code').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); rtAdd(); } });
+  $('#rt-code').focus(); rtDraw();
+}
+function rtAdd() {
+  const el = $('#rt-code'), txt = el.value; el.value = '';
+  const codes = [...new Set(txt.match(/\d{9,14}/g) || (txt.trim() ? txt.trim().split(/\s+/) : []))];
+  let dup = 0;
+  codes.forEach(code => {
+    const lines = S.orders.filter(o => o.code === code);
+    if (!lines.length) { if (!RET.missing.includes(code)) RET.missing.push(code); return; }
+    lines.forEach(o => { if (RET.items.some(x => x.id === o.id)) dup++; else RET.items.push({ id: o.id, code, cond: 'tot', on: retEligible(o) }); });
+  });
+  if (dup && codes.length === 1) toast('Mã này đã có trong danh sách');
+  rtDraw(); el.focus();
+}
+function rtDraw() {
+  const groups = {}; RET.items.forEach(x => (groups[x.code] = groups[x.code] || []).push(x));
+  $('#rt-list').innerHTML = Object.entries(groups).map(([code, xs]) => `<div class="card kien"><div class="kh"><b class="code">${esc(code)}</b><span class="sp" style="flex:1"></span><button class="btn sm" data-a="rt-del" data-code="${esc(code)}">Bỏ mã này</button></div>
+    ${xs.map(x => { const o = S.orders.find(y => y.id === x.id), ok = retEligible(o);
+      return `<div class="ln pk"><label><input type="checkbox" data-rt="on" data-id="${x.id}" ${x.on ? 'checked' : ''} ${ok ? '' : 'disabled'}> ${esc(lineText(o))} ${itemTags(o)}</label>
+        ${ok ? `<select data-rt="cond" data-id="${x.id}"><option value="tot" ${x.cond === 'tot' ? 'selected' : ''}>Tốt</option><option value="loi" ${x.cond === 'loi' ? 'selected' : ''}>Lỗi</option></select>` : `<span class="mut">${esc(ST[o.status])}: chưa thể nhập hoàn</span>`}</div>`; }).join('')}</div>`).join('')
+    + RET.missing.map(c => `<div class="warn">Không thấy mã <b>${esc(c)}</b> trong đơn hàng. <button class="btn sm" data-a="rt-manual" data-code="${esc(c)}">Nhập tay</button></div>`).join('');
+  const k = RET.items.filter(x => x.on).length, sv = document.querySelector('[data-a=rt-save]');
+  if (sv) sv.textContent = k ? `Lưu hàng hoàn (${k} đôi)` : 'Lưu hàng hoàn';
+}
+function rtSave() {
+  const sel = RET.items.filter(x => x.on);
+  if (!sel.length) return toast('Chưa chọn đôi nào để nhập hoàn');
+  const ops = sel.map(x => ({ t: 'return.add', orderId: x.id, cond: x.cond }));
+  sel.forEach(x => { const o = S.orders.find(y => y.id === x.id); if (o) o.status = 'hoan'; });
+  save(ops); closeModal(); toast(`Đang nhập ${sel.length} đôi hàng hoàn…`);
+}
+
+/* --- Kiểm kho hàng tháng --- */
+let CK = null;
+function ckRows() {
+  return CK.rows.map((r, i) => `<tr data-ck="r${i}" data-q="${esc((r.product + ' ' + r.size + ' ' + r.color).toLowerCase())}"><td>${esc(lineText(r))}</td><td>${r.book}</td>
+    <td><input type="number" min="0" data-ckv="r${i}" value="${esc(r.actual)}" class="ckin"></td><td class="mut" id="ckd-r${i}"></td></tr>`).join('')
+    + CK.extra.map((r, i) => `<tr data-ck="x${i}"><td><div class="two"><input data-ckx="product" data-i="${i}" list="dl-prod" value="${esc(r.product)}" placeholder="sản phẩm"><input data-ckx="size" data-i="${i}" list="dl-size" value="${esc(r.size)}" placeholder="size" style="max-width:70px"><input data-ckx="color" data-i="${i}" list="dl-color" value="${esc(r.color)}" placeholder="màu"></div></td><td>0</td>
+    <td><input type="number" min="0" data-ckv="x${i}" value="${esc(r.actual)}" class="ckin"></td><td class="mut" id="ckd-x${i}"></td></tr>`).join('');
+}
+function ckSum() {
+  let counted = 0, lack = 0, over = 0;
+  const upd = (r, id) => { const el = document.getElementById('ckd-' + id); const has = String(r.actual).trim() !== ''; if (has) counted++; const d = has ? (+r.actual) - r.book : 0; if (d < 0) lack -= d; if (d > 0) over += d; if (el) el.textContent = !has ? '' : d === 0 ? '✔ khớp' : (d > 0 ? '+' : '') + d + (d > 0 ? ' thừa' : ' thiếu'); };
+  CK.rows.forEach((r, i) => upd(r, 'r' + i)); CK.extra.forEach((r, i) => upd(r, 'x' + i));
+  $('#ck-sum').innerHTML = counted ? `Đã đếm <b>${counted}</b> mẫu: thiếu <b>${lack}</b> đôi (đánh dấu Thất thoát), thừa <b>${over}</b> đôi (thêm vào kho).` : 'Chưa nhập mẫu nào. Mẫu để trống sẽ không thay đổi.';
+}
+function checkModal() {
+  const piv = {}; availStock().forEach(s => piv[key(s)] = (piv[key(s)] || 0) + 1);
+  CK = { rows: Object.entries(piv).sort().map(([k, c]) => { const [p, sz, cl] = k.split('|'); return { product: p, size: sz, color: cl, book: c, actual: '' }; }), extra: [] };
+  modal(`<h3>Kiểm tồn kho</h3>
+  <p class="mut">Cột <b>Sổ sách</b> là số đôi app đang ghi. Chỉ cần gõ <b>số đếm thực tế</b> ở mẫu bạn đã đếm, mẫu để trống thì không đổi. Thiếu sẽ đánh dấu <b>Thất thoát</b>, thừa sẽ thêm vào kho.</p>
+  <input id="ck-q" placeholder="Lọc mẫu…" style="width:100%;margin-bottom:8px">
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${sizeList()}<datalist id="dl-prod">${PRODUCTS.map(p => `<option value="${esc(p)}">`).join('')}</datalist>
+  <div class="wrap" style="max-height:46vh;overflow:auto"><table class="tbl"><thead><tr><th>Mẫu</th><th>Sổ sách</th><th>Thực tế</th><th></th></tr></thead><tbody id="ck-body"></tbody></table></div>
+  <button class="btn sm" data-a="ck-extra" style="margin-top:6px">+ Thêm mẫu có trong kho nhưng chưa ghi sổ</button>
+  <div id="ck-sum" class="sum"></div>
+  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="ck-save">Chốt kiểm kho</button></div>`);
+  $('#ck-body').innerHTML = ckRows(); ckSum();
+}
+function ckSave() {
+  const all = [...CK.rows, ...CK.extra].filter(r => String(r.actual).trim() !== '');
+  if (all.some(r => !String(r.product).trim() || !String(r.size).trim() || !normColor(r.color))) return toast('Mẫu thêm tay cần đủ sản phẩm, size và màu');
+  let lack = 0, over = 0; all.forEach(r => { const d = (+r.actual) - r.book; if (d < 0) lack -= d; if (d > 0) over += d; });
+  const msg = all.length ? `Chốt kiểm kho: ${all.length} mẫu đã đếm (thiếu ${lack} đôi → Thất thoát, thừa ${over} đôi → thêm vào kho)?` : 'Chưa nhập mẫu nào. Ghi nhận "đã kiểm kho, tất cả khớp sổ sách"?';
+  if (!confirm(msg)) return;
+  save([{ t: 'stocktake.save', rows: all.map(r => ({ product: canon(r.product), size: String(r.size).trim(), color: cap(normColor(r.color)), actual: Math.floor(+r.actual) })) }]);
+  closeModal(); toast('Đang chốt kiểm kho…');
+}
+
+/* --- Nhập tay (không có mã đơn) --- */
+function newStockModal(pre = {}) {
+  modal(`<h3>Nhập tay hàng hoàn / lấy dư</h3>
   <div class="fld"><label>Loại</label><select id="s-type"><option value="hoan">Hàng hoàn</option><option value="du">Hàng lấy dư</option></select></div>
   <div class="fld"><label>Sản phẩm</label><select id="s-product">${opts(PRODUCTS)}</select></div>
   <div class="fld"><label>Size</label><select id="s-size">${opts(SIZES, '40')}</select></div>
   <div class="fld"><label>Màu</label><input id="s-color" list="dl-c2"><datalist id="dl-c2">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
-  <div class="fld"><label>Mã đơn hoàn</label><input id="s-ref" placeholder="(nếu có)"></div>
+  <div class="fld"><label>Mã đơn hoàn</label><input id="s-ref" value="${esc(pre.ref || '')}" placeholder="(nếu có)"></div>
   <div class="fld"><label>Số lượng</label><input id="s-n" type="number" min="1" value="1"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="stock-save">Lưu</button></div>`);
 }
@@ -490,6 +627,7 @@ function vDash() {
   const by = f => L.reduce((m, o) => (m[f(o)] = (m[f(o)] || 0) + 1, m), {});
   const c = s => G.filter(g => g.status === s).length;
   const fromStock = L.filter(o => o.fromStock).length;
+  const hoanN = L.filter(o => o.status === 'hoan').length, delivered = L.filter(o => o.status === 'da_giao' || o.status === 'hoan').length, hoanRate = delivered ? (hoanN / delivered * 100).toFixed(1).replace(/.0$/, '').replace('.', ',') : 0;
   const stale = S.groups.filter(g => (g.status === 'moi' || g.status === 'khong_co') && g.date < today());
   const noCode = live.filter(g => !g.code).length;
   $('#main').innerHTML = `<div class="bar"><select data-f="month">${months.map(m => `<option value="${m}" ${m === F.month ? 'selected' : ''}>Tháng ${m.slice(5)}/${m.slice(0, 4)}</option>`).join('')}</select><span class="sp"></span>
@@ -500,6 +638,7 @@ function vDash() {
     <div class="stat"><b>${c('moi') + c('da_dong')}</b><span>chưa giao xong</span></div>
     <div class="stat"><b>${c('khong_co')}</b><span>không có hàng</span></div>
     <div class="stat"><b>${c('huy')}</b><span>đã hủy</span></div>
+    <div class="stat"><b>${hoanN}</b><span>đôi đã hoàn (${hoanRate}% số đôi đã giao)</span></div>
     <div class="stat"><b>${L.length ? Math.round(fromStock / L.length * 100) : 0}%</b><span>đôi lấy từ hàng tồn</span></div>
     <div class="stat"><b>${availStock().length}</b><span>đôi còn trong kho</span></div></div>
   ${stale.length ? `<div class="warn">⚠ ${stale.length} đơn của ngày trước vẫn chưa đóng xong (Chờ đóng / Không có hàng).</div>` : ''}
@@ -566,15 +705,48 @@ document.addEventListener('click', e => {
     }
     case 'csv': return exportCSV();
     case 'new-stock': return newStockModal();
+    case 'new-goods': return newGoodsModal();
+    case 'ng-save': return ngSave();
+    case 'return-open': return returnModal();
+    case 'rt-add': return rtAdd();
+    case 'rt-del': RET.items = RET.items.filter(x => x.code !== d.code); return rtDraw();
+    case 'rt-manual': { const code = d.code || ''; closeModal(); return newStockModal({ ref: code }); }
+    case 'rt-save': return rtSave();
+    case 'check-open': return checkModal();
+    case 'ck-extra': CK.extra.push({ product: '', size: '', color: '', book: 0, actual: '' }); $('#ck-body').innerHTML = ckRows(); return ckSum();
+    case 'ck-save': return ckSave();
+    case 'ret-undo': {
+      const st = S.stock.find(x => x.id === d.id); if (!st) return;
+      if (!confirm('Hoàn tác nhập hoàn này? Đôi này sẽ bị bỏ khỏi kho (đánh dấu Thất thoát) và đơn gốc trở về Đã giao.')) return;
+      const m = /Hoàn từ đơn (D\d+)/.exec(st.note), o = m && S.orders.find(x => x.id === m[1]);
+      st.state = 'mat'; if (o && o.status === 'hoan') o.status = 'da_giao';
+      save([{ t: 'return.undo', id: st.id }]); return render();
+    }
     case 'stock-save': return saveStock();
-    case 'stock-use': { const s = S.stock.find(x => x.id === d.id); s.used = true; s.usedDate = today(); save([{ t: 'stock.use', id: s.id }]); return render(); }
-    case 'stock-free': { const s = S.stock.find(x => x.id === d.id); s.used = false; s.usedDate = ''; s.usedBy = ''; save([{ t: 'stock.free', id: s.id }]); return render(); }
+    case 'stock-use': { const s = S.stock.find(x => x.id === d.id); s.used = true; s.state = 'used'; s.usedDate = today(); save([{ t: 'stock.use', id: s.id }]); return render(); }
+    case 'stock-free': { const s = S.stock.find(x => x.id === d.id); s.used = false; s.state = 'con'; s.usedDate = ''; s.usedBy = ''; save([{ t: 'stock.free', id: s.id }]); return render(); }
   }
 });
 document.addEventListener('input', e => {
   const el = e.target;
   // Form thêm đơn / sửa đơn: cập nhật dữ liệu nháp, không vẽ lại cả form
   if (el.closest('#modal')) {
+    if (NG && el.dataset.ng) {
+      if (el.dataset.ng === 'productSel') {
+        if (el.value === '__other__') { NG.custom = true; NG.product = ''; } else { NG.custom = false; NG.product = el.value; }
+        ngProdDraw(); if (NG.custom) { const i2 = document.querySelector('#ng-prod [data-ng=product]'); if (i2) i2.focus(); }
+      } else NG.product = el.value;
+      return;
+    }
+    if (NG && (el.dataset.ngs !== undefined || el.dataset.ngo)) { ngSum(); return; }
+    if (RET && el.dataset.rt) {
+      const x = RET.items.find(y => y.id === el.dataset.id);
+      if (x) { if (el.dataset.rt === 'on') x.on = el.checked; else x.cond = el.value; rtDraw(); }
+      return;
+    }
+    if (CK && el.id === 'ck-q') { const q = el.value.toLowerCase(); document.querySelectorAll('#ck-body tr').forEach(tr => { tr.style.display = !q || tr.dataset.ck[0] === 'x' || (tr.dataset.q || '').includes(q) ? '' : 'none'; }); return; }
+    if (CK && el.dataset.ckv) { const arr = el.dataset.ckv[0] === 'r' ? CK.rows : CK.extra; arr[+el.dataset.ckv.slice(1)].actual = el.value; ckSum(); return; }
+    if (CK && el.dataset.ckx) { CK.extra[+el.dataset.i][el.dataset.ckx] = el.value; return; }
     const row = el.closest('[data-i]'), i = row ? +row.dataset.i : -1;
     if (ADD && row && row.parentElement.id === 'alines') {
       const l = ADD.lines[i];
