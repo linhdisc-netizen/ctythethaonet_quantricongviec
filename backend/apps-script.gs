@@ -53,7 +53,8 @@ function book() {
   if (!_ss) throw new Error('Script chưa gắn với Google Sheet. Hãy dán ID của Sheet vào SHEET_ID ở đầu file script.');
   return _ss;
 }
-const tz = () => book().getSpreadsheetTimeZone();
+// Sheet mới tạo/nhập từ Excel đôi khi chưa có múi giờ (trả về null) nên phải có phương án dự phòng
+const tz = () => book().getSpreadsheetTimeZone() || Session.getScriptTimeZone() || 'Asia/Ho_Chi_Minh';
 const fmt = (d, f) => Utilities.formatDate(d, tz(), f);
 const pad = n => (n < 10 ? '0' : '') + n;
 
