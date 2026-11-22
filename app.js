@@ -225,7 +225,7 @@ function vOrders() {
 
 /* ===== Thêm đơn (nhiều đôi) ===== */
 let ADD = null;
-const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, stockId: '', ...p });
+const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, src: 'new', stockIds: [], autoPick: false, ...p });
 const kemList = () => `<datalist id="dl-kem">${KEMS.filter(Boolean).map(k => `<option value="${esc(k)}">`).join('')}</datalist>`;
 function lineHtml(l, i) {
   return `<div class="aline" data-i="${i}">
@@ -236,6 +236,9 @@ function lineHtml(l, i) {
     <input data-k="qty" type="number" min="1" max="20" value="${l.qty}" title="Số đôi giống nhau">
     ${ADD.lines.length > 1 ? `<button class="btn sm bad" data-a="al-del" data-i="${i}" title="Bỏ dòng này">✕</button>` : '<span></span>'}
     <input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này (tuỳ chọn)">
+    <div class="srcrow wide"><span class="mut">Nguồn hàng:</span>
+      <label><input type="radio" name="src-${i}" value="new" ${l.src === 'new' ? 'checked' : ''}> Lấy hàng mới</label>
+      <label><input type="radio" name="src-${i}" value="stock" ${l.src === 'stock' ? 'checked' : ''}> Dùng hàng tồn <span class="tag stock" id="sc-${i}"></span></label></div>
     <div class="sugg-line" id="sg-${i}"></div></div>`;
 }
 function newOrderModal(pre = {}) {
@@ -245,23 +248,41 @@ function newOrderModal(pre = {}) {
   <div class="fld"><label>Ngày</label><input type="date" id="a-date" value="${ADD.date}"></div>
   <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802868950124 (các đôi trong cùng đơn dùng chung mã)"></div>
   ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
-  <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi)</span></div>
+  <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi · nguồn hàng)</span></div>
   <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}
   <div id="alines"></div>
   <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}. Mỗi dòng có thể ghi chú riêng.</div>
   <button class="btn sm" data-a="al-add" style="margin-top:6px">+ thêm đôi</button>
+  <div id="a-sum" class="sum"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="save-order">Lưu đơn</button></div>`);
   drawLines();
 }
 function drawLines() { $('#alines').innerHTML = ADD.lines.map(lineHtml).join(''); ADD.lines.forEach((_, i) => updSug(i)); }
+// Đôi tồn đúng mẫu của dòng i (trừ những đôi đã chọn ở dòng khác)
+function availFor(i) {
+  const l = ADD.lines[i]; if (!normColor(l.color)) return [];
+  const taken = new Set(ADD.lines.flatMap((x, j) => j !== i ? x.stockIds : []));
+  return matches({ product: l.product, size: l.size, color: normColor(l.color) }).filter(s => !taken.has(s.id));
+}
 function updSug(i) {
-  const l = ADD.lines[i], el = $('#sg-' + i); if (!el) return;
-  const taken = new Set(ADD.lines.map((x, j) => j !== i && x.stockId).filter(Boolean));
-  const m = l.color && l.qty === 1 ? matches({ product: l.product, size: l.size, color: normColor(l.color) }).filter(s => !taken.has(s.id)) : [];
-  if (l.stockId && !m.some(s => s.id === l.stockId)) l.stockId = '';
-  el.innerHTML = m.length ? `<div class="sugg"><b>Kho có ${m.length} đôi tồn đúng mẫu này</b> – dùng lại?
-    <label><input type="radio" name="stk-${i}" value="" ${!l.stockId ? 'checked' : ''}> Không, đặt hàng mới</label>
-    ${m.map(s => `<label><input type="radio" name="stk-${i}" value="${s.id}" ${l.stockId === s.id ? 'checked' : ''}> Dùng tồn: ${s.type === 'hoan' ? 'hàng hoàn' : 'hàng lấy dư'} ${fmtD(s.date)}${s.ref ? ' · ' + esc(s.ref) : ''}</label>`).join('')}</div>` : '';
+  const l = ADD.lines[i], el = $('#sg-' + i), sc = $('#sc-' + i); if (!el) return;
+  const av = availFor(i);
+  if (sc) sc.textContent = normColor(l.color) ? 'kho có ' + av.length : '';
+  l.stockIds = l.stockIds.filter(id => av.some(s => s.id === id)).slice(0, l.qty);
+  if (l.src === 'stock') {
+    if (l.autoPick) { l.stockIds = av.slice(0, l.qty).map(s => s.id); l.autoPick = false; }
+    el.innerHTML = !normColor(l.color) ? '<div class="mut">Chọn màu trước để xem kho có đôi nào.</div>'
+      : av.length ? `<div class="sugg"><b>Chọn đôi lấy từ kho</b> (tối đa ${l.qty} đôi). Đôi được chọn sẽ được <b>đánh dấu "Đã dùng"</b> và trừ khỏi kho khi lưu đơn.
+        ${av.map(s => `<label><input type="checkbox" data-stk="${s.id}" ${l.stockIds.includes(s.id) ? 'checked' : ''}> ${s.type === 'hoan' ? 'Hàng hoàn' : 'Hàng lấy dư'} ${fmtD(s.date)}${s.ref ? ' · ' + esc(s.ref) : ''}</label>`).join('')}
+        <div class="mut" style="margin-top:4px">${l.stockIds.length}/${l.qty} đôi lấy từ tồn${l.qty > l.stockIds.length ? ' · ' + (l.qty - l.stockIds.length) + ' đôi còn lại lấy hàng mới' : ''}</div></div>`
+      : '<div class="warn">Kho không có tồn đúng mẫu này, các đôi sẽ được lấy hàng mới.</div>';
+  } else el.innerHTML = '';
+  updSum();
+}
+function updSum() {
+  const el = $('#a-sum'); if (!el) return;
+  const tot = ADD.lines.reduce((n, l) => n + l.qty, 0), st = ADD.lines.reduce((n, l) => n + (l.src === 'stock' ? Math.min(l.stockIds.length, l.qty) : 0), 0);
+  el.innerHTML = `Tổng <b>${tot}</b> đôi: <b>${st}</b> đôi dùng hàng tồn (trừ khỏi kho), <b>${tot - st}</b> đôi lấy hàng mới.`;
 }
 // Thêm nhiều dòng trong một lần ghi. items: [{d, stock}]
 function addOrders(items) {
@@ -278,10 +299,12 @@ function saveOrder() {
   const items = [], onote = ($('#a-note') ? $('#a-note').value.trim() : '');
   ADD.lines.forEach((l, li) => {
     const n = Math.max(1, Math.min(+l.qty || 1, 20));
-    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: l.product, size: l.size, color: l.color, kem: l.kem, note: (li === 0 && k === 0 ? [onote, l.note] : [l.note]).filter(Boolean).join(' | ') }, stock: k === 0 && l.stockId ? S.stock.find(s => s.id === l.stockId) : null });
+    const ids = l.src === 'stock' ? l.stockIds.slice(0, n) : [];
+    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: l.product, size: l.size, color: l.color, kem: l.kem, note: (li === 0 && k === 0 ? [onote, l.note] : [l.note]).filter(Boolean).join(' | ') }, stock: ids[k] ? S.stock.find(s => s.id === ids[k]) : null });
   });
+  const used = items.filter(i => i.stock).length;
   addOrders(items);
-  closeModal(); toast(`Đang thêm ${items.length} đôi vào Google Sheet…`);
+  closeModal(); toast(`Đang thêm ${items.length} đôi vào Google Sheet${used ? ` (trừ ${used} đôi khỏi kho tồn)` : ''}…`);
 }
 
 /* ===== Dán nhiều đơn ===== */
@@ -299,7 +322,8 @@ function parseLine(line) {
 }
 function bulkModal() {
   modal(`<h3>Dán nhiều đơn</h3><p class="mut">Mỗi dòng một đôi. Các dòng cùng mã đơn sẽ thành một đơn nhiều đôi. Thêm <span class="code">x2</span> hoặc <span class="code">2 đôi</span> nếu có nhiều đôi giống nhau.<br>Ví dụ: <span class="code">nagaki karyu 42 xanh ngọc 802868950124 x2 kèm 2 tất đen ghi chú giao giờ hành chính</span><br>Sau chữ <b>kèm</b> là đồ đóng kèm, sau <b>ghi chú</b> là ghi chú (viết tự do).</p>
-  <textarea id="bulk" rows="9" placeholder="Dán danh sách đơn ở đây…"></textarea><div id="bulk-res" class="mut"></div>
+  <textarea id="bulk" rows="9" placeholder="Dán danh sách đơn ở đây…"></textarea>
+  <label style="display:block;margin:8px 0"><input type="checkbox" id="bulk-auto"> Tự dùng hàng tồn nếu kho có đúng mẫu (đôi đó sẽ được <b>đánh dấu Đã dùng</b> và trừ khỏi kho). Không tích thì tất cả lấy hàng mới.</label><div id="bulk-res" class="mut"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="bulk-save">Thêm các dòng hợp lệ</button></div>`);
   $('#bulk').oninput = () => {
     const ls = $('#bulk').value.split('\n').filter(l => l.trim()).map(parseLine);
@@ -309,13 +333,18 @@ function bulkModal() {
 }
 function bulkSave() {
   const ls = $('#bulk').value.split('\n').filter(l => l.trim()).map(parseLine).filter(x => x.product && x.size && x.color);
-  const have = new Set(S.orders.map(o => o.code).filter(Boolean)); let skip = 0; const items = [];
+  const have = new Set(S.orders.map(o => o.code).filter(Boolean)); let skip = 0; const items = [], auto = $('#bulk-auto') && $('#bulk-auto').checked, taken = new Set();
   ls.forEach(x => {
     if (x.code && have.has(x.code)) { skip++; return; }      // mã đã có trong sheet thì bỏ qua (dán lại lần nữa)
-    for (let k = 0; k < x.qty; k++) items.push({ d: x });
+    for (let k = 0; k < x.qty; k++) {
+      const st = auto ? matches({ product: x.product, size: x.size, color: normColor(x.color) }).find(s => !taken.has(s.id)) : null;
+      if (st) taken.add(st.id);
+      items.push({ d: x, stock: st || null });
+    }
   });
+  const used = items.filter(i => i.stock).length;
   if (items.length) addOrders(items);
-  closeModal(); toast(`Đang thêm ${items.length} đôi${skip ? `, bỏ qua ${skip} dòng có mã đã tồn tại` : ''}…`);
+  closeModal(); toast(`Đang thêm ${items.length} đôi${used ? `, trừ ${used} đôi khỏi kho tồn` : ''}${skip ? `, bỏ qua ${skip} dòng có mã đã tồn tại` : ''}…`);
 }
 
 /* ===== Sửa đơn ===== */
@@ -533,8 +562,20 @@ document.addEventListener('input', e => {
   if (el.closest('#modal')) {
     const row = el.closest('[data-i]'), i = row ? +row.dataset.i : -1;
     if (ADD && row && row.parentElement.id === 'alines') {
-      if (el.dataset.k) { ADD.lines[i][el.dataset.k] = el.dataset.k === 'qty' ? Math.max(1, +el.value || 1) : el.value; if (['product', 'size', 'color', 'qty'].includes(el.dataset.k)) { ADD.lines[i].stockId = ''; updSug(i); } }
-      else if (el.type === 'radio') { ADD.lines[i].stockId = el.value; ADD.lines.forEach((_, j) => j !== i && updSug(j)); }
+      const l = ADD.lines[i];
+      if (el.dataset.k) {
+        l[el.dataset.k] = el.dataset.k === 'qty' ? Math.max(1, Math.min(+el.value || 1, 20)) : el.value;
+        if (['product', 'size', 'color'].includes(el.dataset.k)) { l.stockIds = []; l.autoPick = l.src === 'stock'; }
+        if (el.dataset.k === 'qty' && l.src === 'stock') l.autoPick = true;
+        if (['product', 'size', 'color', 'qty'].includes(el.dataset.k)) ADD.lines.forEach((_, j) => updSug(j));
+      } else if (el.type === 'radio' && el.name.startsWith('src-')) {
+        l.src = el.value; l.autoPick = el.value === 'stock'; if (el.value === 'new') l.stockIds = [];
+        ADD.lines.forEach((_, j) => updSug(j));
+      } else if (el.dataset.stk) {
+        if (el.checked && l.stockIds.length >= l.qty) { el.checked = false; toast('Dòng này chỉ cần ' + l.qty + ' đôi. Tăng số đôi nếu muốn lấy thêm.'); return; }
+        l.stockIds = el.checked ? [...l.stockIds, el.dataset.stk] : l.stockIds.filter(x => x !== el.dataset.stk);
+        ADD.lines.forEach((_, j) => updSug(j));
+      }
       return;
     }
     if (EDIT && row && row.parentElement.id === 'elines' && el.dataset.e) { EDIT.lines[i][el.dataset.e] = el.value; return; }

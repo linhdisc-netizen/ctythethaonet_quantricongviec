@@ -87,3 +87,7 @@ details.card summary{cursor:pointer}
 @media(max-width:640px){.aline,#elines .aline{grid-template-columns:1fr 1fr}.aline .btn{justify-self:end}}
 .aline .wide{grid-column:1/-1}
 .note-ln{font-size:12px;margin-left:2px}
+.srcrow{display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:13px}
+.srcrow label{cursor:pointer;display:flex;gap:4px;align-items:center}
+.sum{margin-top:10px;padding:8px 10px;background:var(--bg);border-radius:8px;font-size:13px}
+.sugg-line .warn{margin:4px 0}
