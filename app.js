@@ -51,7 +51,7 @@ function build(d) {
   if (c.kems && c.kems.length) KEMS = ['', ...c.kems.map(lc)];
   S.orders = d.orders.map(o => ({
     id: o.id, date: String(o.date).slice(0, 10), product: o.product, size: String(o.size), color: normColor(o.color), code: String(o.code || '').trim(),
-    kem: lc(o.kem), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
+    kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
   })).filter(o => o.product);
   S.stock = d.stock.map(x => ({
     id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
@@ -70,12 +70,11 @@ function buildGroups() {
     const g = { id: items[0].id, code: items[0].code, date: items.map(i => i.date).sort()[0], items, active: act };
     g.status = !act.length ? 'huy' : act.every(i => i.status === act[0].status) ? act[0].status
       : act.some(i => i.status === 'khong_co') ? 'khong_co' : act.some(i => i.status === 'moi') ? 'moi' : 'da_dong';
-    g.kem = {}; act.forEach(i => { if (i.kem) g.kem[i.kem] = (g.kem[i.kem] || 0) + 1; });
-    return g;
+        return g;
   }).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 }
 const groupOf = id => S.groups.find(g => g.id === id);
-const kemText = g => Object.entries(g.kem).map(([k, n]) => `${n} ${k}`).join(', ');
+const kemText = g => { const m = {}; g.active.forEach(i => { if (i.kem) m[i.kem] = (m[i.kem] || 0) + 1; }); return Object.entries(m).map(([k, n]) => n > 1 ? `${n}× ${k}` : k).join(', '); };
 
 let busy = 0, chain = Promise.resolve();
 // Ghi lên sheet lần lượt (không chạy song song), xong thì tải lại dữ liệu mới nhất.
@@ -215,8 +214,8 @@ function vOrders() {
     const miss = g.active.filter(i => i.status === 'khong_co').length;
     return `<tr><td>${fmtD(g.date)}</td>
     <td class="code">${esc(g.code) || '<span class="mut">—</span>'}${g.active.length > 1 ? `<div><span class="tag">${g.active.length} đôi</span></div>` : ''}</td>
-    <td>${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}</div>`).join('')}
-      ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm: ${esc(kemText(g))}</div>` : ''}</td>
+    <td>${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
+      ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</td>
     <td>${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}</td>
     <td><div class="acts">${groupButtons(g)}</div></td>
     <td class="nw"><button class="btn sm" data-a="cm" data-g="${g.id}">💬${nc ? ' ' + nc : ''}</button>${can('shop') && (g.status !== 'da_giao' || role === 'chu') ? ` <button class="btn sm" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</td></tr>`;
@@ -226,25 +225,30 @@ function vOrders() {
 
 /* ===== Thêm đơn (nhiều đôi) ===== */
 let ADD = null;
-const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', qty: 1, stockId: '', ...p });
+const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, stockId: '', ...p });
+const kemList = () => `<datalist id="dl-kem">${KEMS.filter(Boolean).map(k => `<option value="${esc(k)}">`).join('')}</datalist>`;
 function lineHtml(l, i) {
   return `<div class="aline" data-i="${i}">
     <select data-k="product">${opts(PRODUCTS, l.product)}</select>
     <select data-k="size">${opts(SIZES, l.size)}</select>
     <input data-k="color" list="dl-color" value="${esc(l.color)}" placeholder="màu">
-    <select data-k="kem">${KEMS.map(k => `<option value="${k}" ${k === l.kem ? 'selected' : ''}>${k || '(không kèm)'}</option>`).join('')}</select>
+    <input data-k="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm (tuỳ ý)">
     <input data-k="qty" type="number" min="1" max="20" value="${l.qty}" title="Số đôi giống nhau">
     ${ADD.lines.length > 1 ? `<button class="btn sm bad" data-a="al-del" data-i="${i}" title="Bỏ dòng này">✕</button>` : '<span></span>'}
+    <input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này (tuỳ chọn)">
     <div class="sugg-line" id="sg-${i}"></div></div>`;
 }
 function newOrderModal(pre = {}) {
   ADD = { date: pre.date || today(), code: pre.code || '', lines: [newLine(pre.line || {})], extra: !!pre.code };
+  const kemHint = 'Đóng kèm viết tự do, ví dụ: 2 tất đen + 1 bó gối';
   modal(`<h3>${pre.code ? 'Thêm đôi vào đơn ' + esc(pre.code) : 'Thêm đơn'}</h3>
   <div class="fld"><label>Ngày</label><input type="date" id="a-date" value="${ADD.date}"></div>
   <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802868950124 (các đôi trong cùng đơn dùng chung mã)"></div>
+  ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
   <div class="mut" style="margin:10px 0 4px">Hàng trong đơn: <span style="font-size:12px">(sản phẩm · size · màu · đóng kèm · số đôi)</span></div>
-  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}
   <div id="alines"></div>
+  <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}. Mỗi dòng có thể ghi chú riêng.</div>
   <button class="btn sm" data-a="al-add" style="margin-top:6px">+ thêm đôi</button>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="save-order">Lưu đơn</button></div>`);
   drawLines();
@@ -263,7 +267,7 @@ function updSug(i) {
 function addOrders(items) {
   const ops = items.map(({ d, stock }) => {
     if (stock) { stock.used = true; stock.usedDate = today(); }
-    return { t: 'order.add', date: d.date || today(), product: d.product, size: d.size, color: cap(normColor(d.color)), code: d.code || '', kem: cap(d.kem || ''), stockId: stock ? stock.id : undefined };
+    return { t: 'order.add', date: d.date || today(), product: d.product, size: d.size, color: cap(normColor(d.color)), code: d.code || '', kem: String(d.kem || '').trim(), note: String(d.note || '').trim(), stockId: stock ? stock.id : undefined };
   });
   return save(ops);
 }
@@ -271,10 +275,10 @@ function saveOrder() {
   const date = $('#a-date').value, code = $('#a-code').value.replace(/\D/g, '');
   if (ADD.lines.some(l => !normColor(l.color))) return toast('Dòng nào cũng cần chọn màu');
   if (code && !ADD.extra && S.orders.some(o => o.code === code) && !confirm('Mã đơn này đã có trong sheet. Vẫn thêm các đôi này vào đơn đó?')) return;
-  const items = [];
-  ADD.lines.forEach(l => {
+  const items = [], onote = ($('#a-note') ? $('#a-note').value.trim() : '');
+  ADD.lines.forEach((l, li) => {
     const n = Math.max(1, Math.min(+l.qty || 1, 20));
-    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: l.product, size: l.size, color: l.color, kem: l.kem }, stock: k === 0 && l.stockId ? S.stock.find(s => s.id === l.stockId) : null });
+    for (let k = 0; k < n; k++) items.push({ d: { date, code, product: l.product, size: l.size, color: l.color, kem: l.kem, note: (li === 0 && k === 0 ? [onote, l.note] : [l.note]).filter(Boolean).join(' | ') }, stock: k === 0 && l.stockId ? S.stock.find(s => s.id === l.stockId) : null });
   });
   addOrders(items);
   closeModal(); toast(`Đang thêm ${items.length} đôi vào Google Sheet…`);
@@ -282,16 +286,19 @@ function saveOrder() {
 
 /* ===== Dán nhiều đơn ===== */
 function parseLine(line) {
+  let note = '', kemFree = '';
+  const nm = line.match(/(?:ghi chú|note)\s*[:\-]?\s*(.+)$/i); if (nm) { note = nm[1].trim(); line = line.slice(0, nm.index); }
+  const km = line.match(/\bkèm\s*[:\-]?\s*(.+)$/i); if (km) { kemFree = km[1].trim(); line = line.slice(0, km.index); }
   let t = line.toLowerCase(), code = '', qty = 1;
   const cm = t.match(/\b\d{9,14}\b/); if (cm) { code = cm[0]; t = t.replace(code, ' '); }
   const qm = t.match(/(?:^|\s)[x×]\s?(\d{1,2})\b|\b(\d{1,2})\s?(?:đôi|doi)\b/); if (qm) { qty = +(qm[1] || qm[2]) || 1; t = t.replace(qm[0], ' '); }
   const sm = t.match(/\b(3[5-9]|4[0-6])\b/);
   const pm = [['karyu', 'Nagaki Karyu'], ['kakashi', 'Nagaki Kakashi'], ['katashi|takashi', 'Nagaki Katashi'], ['netketsu|nekketsu', 'Nagaki Nekketsu'], ['kizuma', 'Kizuma']].find(([r]) => new RegExp(r).test(t));
   const color = colorList().sort((a, b) => b.length - a.length).find(c => t.includes(c)) || '';
-  return { product: pm && pm[1], size: sm && sm[1], color, code, qty, kem: /bó gối/.test(t) ? 'bó gối' : /\btất\b/.test(t) ? 'tất' : '' };
+  return { product: pm && pm[1], size: sm && sm[1], color, code, qty, note, kem: kemFree || (/bó gối/.test(t) ? 'bó gối' : /\btất\b/.test(t) ? 'tất' : '') };
 }
 function bulkModal() {
-  modal(`<h3>Dán nhiều đơn</h3><p class="mut">Mỗi dòng một đôi. Các dòng cùng mã đơn sẽ thành một đơn nhiều đôi. Thêm <span class="code">x2</span> hoặc <span class="code">2 đôi</span> nếu có nhiều đôi giống nhau.<br>Ví dụ: <span class="code">nagaki karyu 42 xanh ngọc 802868950124 bó gối x2</span></p>
+  modal(`<h3>Dán nhiều đơn</h3><p class="mut">Mỗi dòng một đôi. Các dòng cùng mã đơn sẽ thành một đơn nhiều đôi. Thêm <span class="code">x2</span> hoặc <span class="code">2 đôi</span> nếu có nhiều đôi giống nhau.<br>Ví dụ: <span class="code">nagaki karyu 42 xanh ngọc 802868950124 x2 kèm 2 tất đen ghi chú giao giờ hành chính</span><br>Sau chữ <b>kèm</b> là đồ đóng kèm, sau <b>ghi chú</b> là ghi chú (viết tự do).</p>
   <textarea id="bulk" rows="9" placeholder="Dán danh sách đơn ở đây…"></textarea><div id="bulk-res" class="mut"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="bulk-save">Thêm các dòng hợp lệ</button></div>`);
   $('#bulk').oninput = () => {
@@ -315,17 +322,18 @@ function bulkSave() {
 let EDIT = null;
 function editModal(gid) {
   const g = groupOf(gid); if (!g) return;
-  EDIT = { gid, code: g.code, date: g.date, lines: g.items.map(i => ({ id: i.id, product: i.product, size: i.size, color: i.color, kem: i.kem, status: i.status, orig: { product: i.product, size: i.size, color: i.color, kem: i.kem } })) };
+  EDIT = { gid, code: g.code, date: g.date, lines: g.items.map(i => ({ id: i.id, product: i.product, size: i.size, color: i.color, kem: i.kem, note: i.note || '', status: i.status, orig: { product: i.product, size: i.size, color: i.color, kem: i.kem, note: i.note || '' } })) };
   modal(`<h3>Sửa đơn ${esc(g.code) || '(chưa có mã)'}</h3>
   <div class="fld"><label>Ngày</label><input type="date" id="e-date" value="${g.date}"></div>
   <div class="fld"><label>Mã đơn</label><input id="e-code" inputmode="numeric" value="${esc(g.code)}"></div>
-  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+  <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}
   <div class="mut" style="margin:10px 0 4px">Hàng trong đơn:</div>
   <div id="elines">${EDIT.lines.map((l, i) => `<div class="aline${l.status === 'huy' ? ' cancelled' : ''}" data-i="${i}">
     <select data-e="product">${opts(PRODUCTS, l.product)}</select><select data-e="size">${opts(SIZES, l.size)}</select>
-    <input data-e="color" list="dl-color" value="${esc(l.color)}"><select data-e="kem">${KEMS.map(k => `<option value="${k}" ${k === l.kem ? 'selected' : ''}>${k || '(không kèm)'}</option>`).join('')}</select>
+    <input data-e="color" list="dl-color" value="${esc(l.color)}"><input data-e="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm">
     <span>${badge(l.status)}</span>
-    ${l.status === 'huy' ? `<button class="btn sm" data-a="e-reopen" data-i="${i}">Mở lại</button>` : (l.status === 'moi' || l.status === 'khong_co' || role === 'chu') ? `<button class="btn sm bad" data-a="e-cancel" data-i="${i}">Hủy đôi này</button>` : '<span></span>'}</div>`).join('')}</div>
+    ${l.status === 'huy' ? `<button class="btn sm" data-a="e-reopen" data-i="${i}">Mở lại</button>` : (l.status === 'moi' || l.status === 'khong_co' || role === 'chu') ? `<button class="btn sm bad" data-a="e-cancel" data-i="${i}">Hủy đôi này</button>` : '<span></span>'}
+    <input data-e="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này"></div>`).join('')}</div>
   <button class="btn sm" data-a="e-more" style="margin-top:6px">+ thêm đôi vào đơn này</button>
   <div class="row"><button class="btn" data-a="close">Đóng</button><button class="btn pri" data-a="e-save">Lưu thay đổi</button></div>`);
 }
@@ -335,7 +343,9 @@ function saveEdit() {
     const f = {};
     if (code !== g.code) f.code = code;
     if (date !== g.date) f.date = date;
-    ['product', 'size', 'kem'].forEach(k => { if (l[k] !== l.orig[k]) f[k] = l[k]; });
+    ['product', 'size'].forEach(k => { if (l[k] !== l.orig[k]) f[k] = l[k]; });
+    if (String(l.kem || '').trim() !== l.orig.kem) f.kem = String(l.kem || '').trim();
+    if (String(l.note || '').trim() !== l.orig.note) f.note = String(l.note || '').trim();
     if (normColor(l.color) !== l.orig.color) f.color = cap(normColor(l.color));
     if (Object.keys(f).length) ops.push({ t: 'order.edit', id: l.id, fields: f });
   });
@@ -382,7 +392,7 @@ function vPack() {
     const todo = g.items.filter(i => i.status === 'moi' || i.status === 'khong_co');
     return `<div class="card kien"><div class="kh"><b class="code">${esc(g.code) || '(chưa có mã)'}</b> <span class="mut">${fmtD(g.date)}</span>
       ${g.active.length > 1 ? `<span class="tag">${g.active.length} đôi</span>` : ''}${kemText(g) ? `<span class="tag">kèm: ${esc(kemText(g))}</span>` : ''}</div>
-      ${todo.map(i => `<div class="ln pk"><label>${i.status === 'moi' ? `<input type="checkbox" data-tick="${i.id}" ${TICKS.has(i.id) ? 'checked' : ''}> ` : ''}<span class="${i.status === 'khong_co' ? 'cancelled' : ''}">${esc(lineText(i))}</span> ${itemTags(i)}${i.status === 'khong_co' ? ' <span class="badge b-khong_co">hết hàng</span>' : ''}</label>
+      ${todo.map(i => `<div class="ln pk"><label>${i.status === 'moi' ? `<input type="checkbox" data-tick="${i.id}" ${TICKS.has(i.id) ? 'checked' : ''}> ` : ''}<span class="${i.status === 'khong_co' ? 'cancelled' : ''}">${esc(lineText(i))}</span> ${itemTags(i)}${i.status === 'khong_co' ? ' <span class="badge b-khong_co">hết hàng</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</label>
         ${can('kho') ? (i.status === 'moi' ? `<button class="btn sm bad" data-a="line:khong_co" data-id="${i.id}">Hết hàng</button>` : `<button class="btn sm" data-a="line:moi" data-id="${i.id}">Có hàng lại</button>`) : ''}</div>`).join('')}
       <div class="acts" style="margin-top:8px;justify-content:flex-start">${groupButtons(g)}<button class="btn sm" data-a="cm" data-g="${g.id}">💬</button></div></div>`;
   }).join('')}`;

@@ -46,6 +46,7 @@ Repo → **Settings → Pages**: *Source* = **Deploy from a branch**, *Branch* =
 
 ## Đơn nhiều đôi (kiện)
 - Mỗi dòng trong tab Đơn hàng là **một đôi**. Các dòng có **cùng Mã đơn** được app gom thành **một đơn** (kiện). Khi nhập tay trong Sheet, hãy ghi cùng mã ở mọi dòng, đừng gộp ô.
+- **Đóng kèm viết tự do:** ô Đóng kèm gõ gì cũng được (ví dụ `2 tất đen + 1 bó gối`), có gợi ý bó gối, tất. Mỗi đôi có **ô ghi chú riêng**, và có **ghi chú chung cả đơn** khi tạo mới. Ghi chú hiện cho cả Shop và Kho (📝). Khi dán nhiều đơn: sau chữ **kèm** là đồ đóng kèm, sau **ghi chú** là ghi chú.
 - **Shop:** form Thêm đơn có nút **+ thêm đôi** và ô **số đôi** cho các đôi giống nhau. Có thể dán nhiều dòng cùng mã, thêm `x2` hoặc `2 đôi` cho số lượng. Nút **✎** để sửa đơn (mã, ngày, mẫu, size, màu, đóng kèm), hủy từng đôi hoặc hủy cả đơn, thêm đôi vào đơn có sẵn.
 - **Kho:** tab Cần đóng hiển thị theo kiện, ví dụ "3 đôi, kèm 2 bó gối", tick từng đôi khi nhặt hàng, rồi bấm **Đã đóng cả kiện**. Có nút **Hết hàng** cho từng đôi và bảng **Tổng hợp cần lấy hàng**.
 - Trạng thái của đơn lấy từ các đôi: đơn **Không có hàng** nếu có đôi hết hàng; **Đã hủy** khi hủy hết các đôi.
