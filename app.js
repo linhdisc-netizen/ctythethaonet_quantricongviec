@@ -1,16 +1,15 @@
 'use strict';
-/* Giao diện (GitHub Pages) <-> Apps Script <-> Google Sheet "Đóng đơn TTS- A LINH".
+/* Giao diện (GitHub Pages) <-> Apps Script <-> Google Sheet (các tab Đơn hàng, Tồn kho, Danh mục…).
    Toàn bộ dữ liệu nằm trong Google Sheet; trang này không lưu dữ liệu nào ngoài mật khẩu của người dùng trên máy họ. */
 
 /* ===== Hằng số ===== */
-const PRODUCTS = ['Nagaki Karyu', 'Nagaki Kakashi', 'Nagaki Katashi', 'Nagaki Nekketsu', 'Kizuma'];
-const SIZES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
-const BASE_COLORS = ['xanh rêu', 'xanh ngọc', 'trắng đỏ', 'trắng', 'xanh đen', 'xanh bích', 'vàng', 'navy', 'đen', 'trắng đồng', 'cam'];
+let PRODUCTS = ['Nagaki Karyu', 'Nagaki Kakashi', 'Nagaki Katashi', 'Nagaki Nekketsu', 'Kizuma'];
+let SIZES = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45'];
+let BASE_COLORS = ['xanh rêu', 'xanh ngọc', 'trắng đỏ', 'trắng', 'xanh đen', 'xanh bích', 'vàng', 'navy', 'đen', 'trắng đồng', 'cam'];
 const ST = { moi: 'Chờ đóng', da_dong: 'Đã đóng', da_giao: 'Đã giao', khong_co: 'Không có hàng' };
 const ROLES = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
-const KEMS = ['', 'bó gối', 'tất'];
+let KEMS = ['', 'bó gối', 'tất'];
 const TABS = [['orders', 'Đơn hàng'], ['pack', 'Cần đóng'], ['stock', 'Tồn kho'], ['dash', 'Tổng quan']];
-const { parseOrders, parseStock, CELLS } = window.Parse;
 const API = (window.APP_CONFIG || {}).api;
 
 /* ===== Tiện ích ===== */
@@ -40,23 +39,34 @@ async function api(action, x = {}) {
   if (j.error) throw new Error(j.error);
   return j;
 }
+const ST_TO_CODE = Object.fromEntries(Object.entries(ST).map(([k, v]) => [v, k]));
 function build(d) {
-  S.ordersSheet = d.ordersSheet; S.stockSheet = d.stockSheet;
-  S.orders = parseOrders(d.orders).map(o => ({ ...o, id: 'o' + o.row, key: o.code || 'r' + o.row }));
-  S.stock = parseStock(d.stock).map(s => ({ ...s, id: 's' + s.row }));
-  S.links = d.links.map(([k, row]) => ({ key: String(k), stockRow: +row }));
-  const byKey = new Map(S.orders.map(o => [o.key, o]));
-  S.comments = d.comments.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text, orderId: (byKey.get(String(k)) || {}).id }));
+  const lc = x => String(x || '').toLowerCase().trim();
+  const c = d.cats || {};
+  if (c.products && c.products.length) PRODUCTS = c.products;
+  if (c.sizes && c.sizes.length) SIZES = c.sizes.map(String);
+  if (c.colors && c.colors.length) BASE_COLORS = c.colors.map(normColor);
+  if (c.kems && c.kems.length) KEMS = ['', ...c.kems.map(lc)];
+  S.orders = d.orders.map(o => ({
+    id: o.id, key: o.id, date: String(o.date).slice(0, 10), product: o.product, size: String(o.size), color: normColor(o.color), code: String(o.code || ''),
+    kem: lc(o.kem), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
+  })).filter(o => o.product);
+  S.stock = d.stock.map(x => ({
+    id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
+    ref: String(x.ref || ''), used: x.st === 'Đã dùng', usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''),
+  })).filter(x => x.product);
+  S.comments = d.comments.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
   S.log = d.log.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
-  S.stock.forEach(s => { const l = S.links.find(x => x.stockRow === s.row); if (l && byKey.get(l.key)) s.usedBy = byKey.get(l.key).id; });
 }
 let busy = 0, chain = Promise.resolve();
 // Ghi lên sheet lần lượt (không chạy song song), xong thì tải lại dữ liệu mới nhất.
 function save(ops) {
   busy++; setSync('Đang lưu…');
-  chain = chain.then(() => api('write', ops)).then(r => {
-    const skipped = ['sets', 'stockSets', 'stockAppends'].some(k => (r[k] || []).some(x => !x.ok));
-    if (skipped) toast('Có thay đổi không ghi được vì dòng trong sheet đã bị sửa/dời. Đã tải lại dữ liệu.');
+  chain = chain.then(() => api('write', { ops })).then(r => {
+    const rs = r.results || [];
+    if (rs.some(x => x.stockTaken)) toast('Đôi tồn đã có người dùng trước nên đơn được tạo như hàng mới.');
+    else if (rs.some(x => x.conflict)) toast('Có đơn vừa được người khác thay đổi. Đã tải lại dữ liệu mới nhất.');
+    else { const bad = rs.find(x => x.error); if (bad) toast(bad.error); }
   }).catch(e => toast(e.message)).then(async () => { busy--; if (!busy) await refresh(true); });
   return chain;
 }
@@ -84,10 +94,10 @@ function logout(msg) {
 async function enter() {
   const j = await api('login');
   role = j.role;
-  $('#login').hidden = true; $('#me').textContent = 'Vai trò: ' + ROLES[role]; $('#logout').hidden = false;
-  try { localStorage.setItem('tts-pw', PW); } catch { /* bỏ qua */ }
   setSync('Đang tải…');
   const d = await api('load'); build(d);
+  $('#login').hidden = true; $('#me').textContent = 'Vai trò: ' + ROLES[role]; $('#logout').hidden = false;
+  try { localStorage.setItem('tts-pw', PW); } catch { /* bỏ qua */ }
   const dates = S.orders.map(o => o.date).sort();
   F.date = S.orders.some(o => o.date === today()) ? today() : (dates[dates.length - 1] || '');
   F.month = (dates[dates.length - 1] || today()).slice(0, 7);
@@ -97,26 +107,21 @@ async function enter() {
 $('#login-form').addEventListener('submit', async e => {
   e.preventDefault();
   PW = $('#pw').value; $('#login-err').textContent = 'Đang kiểm tra…';
-  try { await enter(); $('#pw').value = ''; } catch (err) { PW = ''; $('#login-err').textContent = err.message; }
+  try { await enter(); $('#pw').value = ''; $('#login-err').textContent = ''; } catch (err) { PW = ''; $('#login-err').textContent = err.message; }
 });
 $('#logout').onclick = () => logout();
 
 /* ===== Nghiệp vụ ===== */
 const can = (...r) => r.includes(role) || role === 'chu';
-const availStock = () => S.stock.filter(s => !s.usedDate);
+const availStock = () => S.stock.filter(s => !s.used);
 const matches = o => availStock().filter(s => key(s) === key(o));
-const emptyOps = () => ({ sets: [], stockSets: [], unlinks: [], log: [] });
-// Trả lại đôi tồn đã gắn với đơn (khi hoàn tác đơn)
-function freeStockOps(o, ops) {
-  const l = S.links.find(x => x.key === o.key); if (!l) return;
-  const s = S.stock.find(x => x.row === l.stockRow);
-  if (s) { ops.stockSets.push({ row: s.row, cells: { H: '' }, expect: s.raw }); s.usedDate = ''; s.usedBy = ''; }
-  ops.unlinks.push(o.key); S.links = S.links.filter(x => x !== l);
-}
+// Đổi trạng thái: cập nhật ngay trên màn hình, server làm phần còn lại (trả tồn, nhật ký…)
 function changeStatus(o, st, ops) {
-  if (st === 'moi' && o.status !== 'khong_co') freeStockOps(o, ops);
-  ops.sets.push({ row: o.row, cells: CELLS[st], expect: o.raw });
-  ops.log.push({ key: o.key, text: `${ST[o.status]} → ${ST[st]}` });
+  ops.push({ t: 'order.status', id: o.id, status: ST[st], from: ST[o.status] });
+  if (st === 'moi' && o.status !== 'khong_co') {
+    S.stock.filter(x => x.usedBy === o.id && x.used).forEach(x => { x.used = false; x.usedDate = ''; x.usedBy = ''; });
+    o.fromStock = false;
+  }
   o.status = st;
 }
 const colorList = () => [...new Set([...BASE_COLORS, ...S.orders.map(o => o.color), ...S.stock.map(s => s.color)].filter(Boolean))];
@@ -140,7 +145,7 @@ function filteredOrders() {
   const q = F.q.toLowerCase();
   return S.orders.filter(o => (!F.date || o.date === F.date) && (!F.st || o.status === F.st) &&
     (!q || (o.code + ' ' + o.product + ' ' + o.color + ' ' + o.size).toLowerCase().includes(q)))
-    .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 }
 function actionsFor(o) {
   const a = [];
@@ -205,14 +210,9 @@ function newOrderModal(pre = {}) {
 }
 // Thêm một hay nhiều đơn trong một lần ghi. items: [{d, stock}]
 function addOrders(items) {
-  const ops = { appends: [], stockSets: [], links: [], log: [] };
-  items.forEach(({ d, stock }, i) => {
-    ops.appends.push({ vals: { A: d.date || today(), B: d.product, C: +d.size, D: normColor(d.color), E: d.code ? +d.code : '', F: d.kem || '', G: stock ? 'tồn' : '', J: '', K: '' } });
-    ops.log.push({ append: i, text: stock ? 'Tạo đơn (dùng hàng tồn)' : 'Tạo đơn' });
-    if (stock) {
-      ops.stockSets.push({ row: stock.row, cells: { H: today() }, expect: stock.raw });
-      ops.links.push({ append: i, stockRow: stock.row }); stock.usedDate = today();
-    }
+  const ops = items.map(({ d, stock }) => {
+    if (stock) { stock.used = true; stock.usedDate = today(); }
+    return { t: 'order.add', date: d.date || today(), product: d.product, size: d.size, color: cap(normColor(d.color)), code: d.code || '', kem: cap(d.kem || ''), stockId: stock ? stock.id : undefined };
   });
   return save(ops);
 }
@@ -296,8 +296,8 @@ function vPack() {
 function vStock() {
   const av = availStock(), q = F.stockQ.toLowerCase();
   const piv = {}; av.forEach(s => piv[key(s)] = (piv[key(s)] || 0) + 1);
-  const rows = S.stock.filter(s => (F.stockView === 'all' || (F.stockView === 'con') === !s.usedDate) && (!q || label(s).toLowerCase().includes(q) || (s.ref || '').includes(q)))
-    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.row - a.row);
+  const rows = S.stock.filter(s => (F.stockView === 'all' || (F.stockView === 'con') === !s.used) && (!q || label(s).toLowerCase().includes(q) || (s.ref || '').includes(q)))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
   $('#main').innerHTML = `<div class="bar"><div class="chips">
     ${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + (S.stock.length - av.length)], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${F.stockView === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
     <input data-f="stockQ" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}"><span class="sp"></span>
@@ -307,8 +307,8 @@ function vStock() {
   <div class="wrap"><table class="tbl"><thead><tr><th>Ngày nhập</th><th>Loại</th><th>Mẫu</th><th>Mã đơn hoàn</th><th>Tình trạng</th><th></th></tr></thead><tbody>
   ${rows.map(s => { const o = s.usedBy && S.orders.find(x => x.id === s.usedBy);
     return `<tr><td>${fmtD(s.date)}</td><td>${s.type === 'hoan' ? 'Hàng hoàn' : 'Hàng lấy dư'}</td><td>${esc(label(s))}</td><td class="code">${esc(s.ref) || '—'}</td>
-    <td>${s.usedDate ? `<span class="badge b-da_dong">Đã dùng ${fmtD(s.usedDate)}${o ? ' · ' + esc(o.code || 'đơn mới') : ''}</span>` : '<span class="badge b-da_giao">Còn hàng</span>'}</td>
-    <td><div class="acts">${can('kho', 'shop') ? (s.usedDate ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>`) : ''}</div></td></tr>`; }).join('') || '<tr><td colspan="6" class="mut">Không có dòng nào.</td></tr>'}
+    <td>${s.used ? `<span class="badge b-da_dong">Đã dùng ${fmtD(s.usedDate)}${o ? ' · ' + esc(o.code || 'đơn mới') : ''}</span>` : '<span class="badge b-da_giao">Còn hàng</span>'}</td>
+    <td><div class="acts">${can('kho', 'shop') ? (s.used ? `<button class="btn sm" data-a="stock-free" data-id="${s.id}">Hoàn tác</button>` : `<button class="btn sm" data-a="stock-use" data-id="${s.id}">Đánh dấu đã dùng</button>`) : ''}</div></td></tr>`; }).join('') || '<tr><td colspan="6" class="mut">Không có dòng nào.</td></tr>'}
   </tbody></table></div>`;
 }
 function newStockModal() {
@@ -324,8 +324,7 @@ function newStockModal() {
 function saveStock() {
   const color = normColor($('#s-color').value); if (!color) return toast('Chọn màu trước nhé');
   const n = Math.min(+$('#s-n').value || 1, 50), type = $('#s-type').value;
-  const vals = { B: today(), C: type === 'hoan' ? 'HÀNG HOÀN' : 'HÀNG LẤY DƯ', D: $('#s-ref').value.trim(), E: $('#s-product').value, F: +$('#s-size').value, G: color };
-  save({ stockAppends: Array.from({ length: n }, () => ({ vals })), log: [{ key: 'kho', text: `Nhập ${n} đôi ${$('#s-product').value} ${$('#s-size').value} ${color} (${type === 'hoan' ? 'hoàn' : 'dư'})` }] });
+  save([{ t: 'stock.add', date: today(), type, product: $('#s-product').value, size: $('#s-size').value, color: cap(color), ref: $('#s-ref').value.trim(), n }]);
   closeModal(); toast(`Đang nhập ${n} đôi vào kho…`);
 }
 
@@ -345,7 +344,7 @@ function vDash() {
   const stale = S.orders.filter(o => o.status === 'moi' && o.date < today());
   const noCode = L.filter(o => !o.code).length;
   $('#main').innerHTML = `<div class="bar"><select data-f="month">${months.map(m => `<option value="${m}" ${m === F.month ? 'selected' : ''}>Tháng ${m.slice(5)}/${m.slice(0, 4)}</option>`).join('')}</select><span class="sp"></span>
-    <span class="mut">Dữ liệu từ sheet: ${esc(S.ordersSheet)}</span></div>
+    <span class="mut">Dữ liệu lấy trực tiếp từ Google Sheet</span></div>
   <div class="grid">
     <div class="stat"><b>${L.length}</b><span>tổng đơn</span></div>
     <div class="stat"><b>${c('da_giao')}</b><span>đã giao</span></div>
@@ -382,7 +381,7 @@ document.addEventListener('click', e => {
   if (d.quick) { const x = $('#cm-text'); x.value = d.quick; return x.focus(); }
   const a = d.a, o = d.id && S.orders.find(x => x.id === d.id);
   if (a.startsWith('st:')) {
-    const ops = emptyOps(); changeStatus(o, a.slice(3), ops); save(ops); return render();
+    const ops = []; changeStatus(o, a.slice(3), ops); save(ops); return render();
   }
   switch (a) {
     case 'reload': setSync('Đang tải…'); return refresh(true);
@@ -394,24 +393,20 @@ document.addEventListener('click', e => {
     case 'cm': return commentModal(d.id);
     case 'cm-send': {
       const text = $('#cm-text').value.trim(); if (!text || !o) return;
-      S.comments.push({ ts: Date.now(), who: role, key: o.key, text, orderId: o.id });
-      save({ comments: [{ key: o.key, text }] });
+      S.comments.push({ ts: Date.now(), who: ROLES[role], key: o.id, text });
+      save([{ t: 'comment', orderId: o.id, text }]);
       return commentModal(d.id);
     }
     case 'pack-all': {
       const g = S.orders.filter(x => x.status === 'moi' && key(x) === d.k);
-      if (confirm(`Đánh dấu đã đóng ${g.length} đơn?`)) { const ops = emptyOps(); g.forEach(x => changeStatus(x, 'da_dong', ops)); save(ops); render(); toast(`Đang lưu ${g.length} đơn…`); }
+      if (confirm(`Đánh dấu đã đóng ${g.length} đơn?`)) { const ops = []; g.forEach(x => changeStatus(x, 'da_dong', ops)); save(ops); render(); toast(`Đang lưu ${g.length} đơn…`); }
       return;
     }
     case 'csv': return exportCSV();
     case 'new-stock': return newStockModal();
     case 'stock-save': return saveStock();
-    case 'stock-use': { const s = S.stock.find(x => x.id === d.id); s.usedDate = today(); save({ stockSets: [{ row: s.row, cells: { H: today() }, expect: s.raw }] }); return render(); }
-    case 'stock-free': {
-      const s = S.stock.find(x => x.id === d.id), l = S.links.find(x => x.stockRow === s.row);
-      s.usedDate = ''; s.usedBy = '';
-      save({ stockSets: [{ row: s.row, cells: { H: '' }, expect: s.raw }], unlinks: l ? [l.key] : [] }); return render();
-    }
+    case 'stock-use': { const s = S.stock.find(x => x.id === d.id); s.used = true; s.usedDate = today(); save([{ t: 'stock.use', id: s.id }]); return render(); }
+    case 'stock-free': { const s = S.stock.find(x => x.id === d.id); s.used = false; s.usedDate = ''; s.usedBy = ''; save([{ t: 'stock.free', id: s.id }]); return render(); }
   }
 });
 document.addEventListener('input', e => {

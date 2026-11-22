@@ -1,46 +1,58 @@
 # Quản lý đơn hàng – Thể Thao Net
 
-Web app đơn giản để Shop (lên đơn), Kho (đóng hàng) và Chủ cùng làm việc trên **một Google Sheet** "Đóng đơn TTS- A LINH".
+Web app đơn giản để Shop (lên đơn), Kho (đóng hàng) và Chủ cùng làm việc trên **một Google Sheet mới**.
 
 ```
-Trình duyệt (GitHub Pages)  ──mật khẩu──►  Apps Script (gắn trong Sheet)  ──►  Google Sheet
+Trình duyệt (GitHub Pages)  ──mật khẩu──►  Apps Script (backend)  ──►  Google Sheet
 ```
 
-- Giao diện là trang tĩnh, nằm trên GitHub Pages. Trang **không lưu dữ liệu**, mọi dữ liệu nằm trong Google Sheet.
-- Repo này công khai nên **không chứa dữ liệu đơn hàng hay mật khẩu**. Không có mật khẩu thì không đọc hoặc ghi được gì.
+- Giao diện là trang tĩnh trên GitHub Pages. Trang **không lưu dữ liệu**, mọi dữ liệu nằm trong Google Sheet.
+- Repo này công khai nên **không chứa dữ liệu đơn hàng hay mật khẩu**.
 - Ba vai trò, mỗi vai trò một mật khẩu: **Shop** (lên đơn), **Kho** (đóng hàng, nhập tồn), **Chủ** (làm được mọi thao tác).
 
-## Tính năng
-- **Đơn hàng:** lọc theo ngày và trạng thái, tìm kiếm, thêm từng đơn hoặc dán nhiều đơn, xuất CSV.
-- **Cần đóng:** đơn chờ đóng gom theo mẫu, size, màu; đóng cả nhóm; đếm số bó gối, tất cần đóng kèm.
-- **Tồn kho:** hàng hoàn và hàng lấy dư. Khi lên đơn trùng mẫu với hàng tồn, app gợi ý dùng lại, và đôi tồn tự chuyển sang "Đã dùng". Hoàn tác đơn thì tồn được trả lại.
-- **Bình luận và lịch sử** trên từng đơn (ai đổi trạng thái, lúc nào).
-- **Tổng quan:** thống kê theo tháng, cảnh báo mã đơn trùng và đơn bị bỏ quên.
+## Cấu trúc Google Sheet (lấy từ file Excel mẫu `Don-hang-TTS-moi.xlsx`)
+| Tab | Nội dung |
+|---|---|
+| Đơn hàng | Một dòng một đơn, **mọi tháng chung một tab**. Có cột ID cố định (D000001…), Trạng thái, Nguồn, Người tạo, Cập nhật lúc |
+| Tồn kho | Hàng hoàn và hàng lấy dư (ID T000001…), tình trạng Còn hàng / Đã dùng, dùng cho đơn nào |
+| Danh mục | Danh sách chọn: sản phẩm, size, màu, đóng kèm |
+| Bình luận, Nhật ký | Do app ghi: ai nói gì, ai đổi gì, lúc nào |
+| Tổng quan, Hướng dẫn | Số liệu tự tính và hướng dẫn dùng file |
+
+App tìm dòng theo **ID**, không theo số dòng hay tên sheet theo tháng, nên sắp xếp, lọc hay chèn dòng trong Sheet không làm app ghi nhầm chỗ. Không đổi tên tab và không đổi tên cột ở dòng 1.
 
 ## Cài đặt (làm một lần)
 
-### 1. Backend Apps Script
-1. Mở file `backend/apps-script.gs`, thay `__PW_SHOP__`, `__PW_KHO__`, `__PW_CHU__` bằng 3 mật khẩu thật (dài, ngẫu nhiên, mỗi vai trò một mật khẩu). **Đừng commit bản đã sửa lên GitHub.**
-2. Mở Google Sheet, chọn **Tiện ích mở rộng → Apps Script**. Xóa code mẫu, dán toàn bộ nội dung, rồi **Lưu**.
+### 1. Tạo Google Sheet mới từ file Excel
+1. Vào https://sheets.google.com, tạo **Bảng tính trống**.
+2. **Tệp → Nhập → Tải lên**, chọn `Don-hang-TTS-moi.xlsx`, chọn **Thay thế bảng tính** → **Nhập dữ liệu**.
+3. Đặt tên Sheet (ví dụ "Đơn hàng TTS"). Kiểm tra có đủ 7 tab và các cột Trạng thái có ô chọn danh sách.
+4. Copy **ID của Sheet** từ link: đoạn nằm giữa `/d/` và `/edit`.
+
+### 2. Backend Apps Script
+1. Mở `backend/apps-script.gs`, thay `__PW_SHOP__`, `__PW_KHO__`, `__PW_CHU__` bằng 3 mật khẩu thật và dán **ID của Sheet** vào `SHEET_ID`. **Đừng commit bản đã sửa lên GitHub.**
+2. Trong **chính Google Sheet mới**, chọn **Tiện ích mở rộng → Apps Script**. Xóa code mẫu, dán toàn bộ nội dung, rồi **Lưu**.
+   > Dự án tạo từ trang script.google.com (dự án độc lập) cũng chạy được, nhưng **bắt buộc** phải điền `SHEET_ID`. Thiếu `SHEET_ID` sẽ báo lỗi "Script chưa gắn với Google Sheet".
 3. **Triển khai → Tùy chọn triển khai mới → Ứng dụng web**: *Thực thi với tư cách* = **Tôi**, *Người có quyền truy cập* = **Bất kỳ ai**. Cấp quyền (Google báo "chưa xác minh" thì chọn **Nâng cao → Tiếp tục**).
 4. Copy **URL ứng dụng web** (dạng `https://script.google.com/macros/s/.../exec`).
 
 > Khi sửa script (đổi mật khẩu, cập nhật), phải **Triển khai → Quản lý bản triển khai → Chỉnh sửa → Phiên bản mới**, không thì thay đổi chưa có hiệu lực.
 
-### 2. Dán link vào giao diện
+### 3. Dán link vào giao diện
 Sửa `config.js`: `window.APP_CONFIG = { api: 'URL-vừa-copy' };` rồi commit. Link này không phải bí mật.
 
-### 3. Bật GitHub Pages
-Repo → **Settings → Pages → Build and deployment**: *Source* = **Deploy from a branch**, *Branch* = **main** / **(root)** → Save. Sau 1–2 phút trang chạy tại `https://<tài-khoản>.github.io/<tên-repo>/`.
+### 4. Bật GitHub Pages
+Repo → **Settings → Pages**: *Source* = **Deploy from a branch**, *Branch* = **main** / **(root)** → Save.
 
-## Cách app dùng Google Sheet
-- Đọc sheet **"Tháng M/YYYY"** của tháng hiện tại và **"Tồn tháng <tháng trước>"**. Sang tháng mới, hãy tạo sheet tháng mới như bình thường.
-- Chỉ ghi: cột **J, K** (Đã đóng / Đã giao), **thêm dòng mới** ở cuối, cột **H** của sheet tồn. Không xóa hay ghi đè dòng nào của bạn.
-- Mỗi lần ghi đều kiểm tra dòng đó còn đúng sản phẩm, size, màu, mã đơn. Nếu sheet vừa bị sửa hoặc dời dòng thì bỏ qua và báo.
-- Sheet cũng cứ sửa tay bình thường được. App tự cập nhật sau tối đa 20 giây hoặc khi bấm "Tải lại".
-- Script tự tạo 3 sheet ở cuối file: `App_BinhLuan`, `App_LienKet`, `App_NhatKy` (bình luận, liên kết đơn–hàng tồn, nhật ký thay đổi).
+## Cách app làm việc với Sheet
+- Sheet vẫn sửa tay bình thường được. App tự cập nhật sau tối đa 20 giây hoặc khi bấm "Tải lại".
+- Dòng bạn gõ tay vào cuối tab Đơn hàng (chưa có ID) sẽ được app tự cấp ID và điền mặc định (Chờ đóng, Mới) ở lần tải kế tiếp.
+- Mỗi thao tác kiểm tra trạng thái hiện tại: hai người cùng đổi một đơn thì người đến sau được báo "đơn vừa được người khác thay đổi" và dữ liệu được tải lại. Hai người cùng lấy một đôi tồn thì chỉ người đến trước được, người sau được tạo đơn như hàng mới.
+- Phân quyền kiểm tra ở backend, không chỉ ẩn nút: Shop không đổi sang "Đã đóng", Kho không thêm đơn, Shop không nhập kho.
+- Không xóa dòng nào trong Sheet của bạn. Muốn hủy đơn, đổi trạng thái thành "Không có hàng".
+- Sheet càng nhiều dòng thì tải càng chậm; từ khoảng vài nghìn đơn nên sao lưu và chuyển đơn cũ sang một file khác.
 
 ## Bảo mật
 - Mật khẩu chỉ được kiểm tra trong Apps Script. Trên máy người dùng, mật khẩu được nhớ trong trình duyệt cho đến khi bấm **Đăng xuất**.
-- Hãy dùng mật khẩu dài, ngẫu nhiên. Muốn thu hồi quyền thì đổi mật khẩu và triển khai lại phiên bản mới.
-- Không dùng chung máy công cộng mà không đăng xuất.
+- Hãy dùng mật khẩu đủ dài. Link Apps Script là công khai và chưa giới hạn số lần thử sai.
+- Muốn thu hồi quyền của ai đó: đổi mật khẩu vai trò của họ và triển khai phiên bản mới.

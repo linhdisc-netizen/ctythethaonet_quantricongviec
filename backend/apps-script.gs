@@ -1,24 +1,24 @@
 /**
- * BACKEND của app quản lý đơn hàng – dán vào Google Sheet "Đóng đơn TTS- A LINH"
- * (Tiện ích mở rộng → Apps Script). Xem README.md.
+ * BACKEND của app quản lý đơn hàng (phiên bản 2: theo ID, một sheet "Đơn hàng" cho mọi tháng).
+ * Dán vào Apps Script của Google Sheet mới (xem README.md).
  *
- * File này là BẢN MẪU. Thay 3 chuỗi __PW_...__ bằng mật khẩu thật (dài, ngẫu nhiên)
- * rồi mới dán vào Apps Script. KHÔNG đưa mật khẩu thật lên GitHub.
+ * File này là BẢN MẪU. Thay 3 chuỗi __PW_...__ bằng mật khẩu thật rồi mới dán vào Apps Script.
+ * KHÔNG đưa mật khẩu thật lên GitHub.
  *
- * AN TOÀN
- *  - Mọi yêu cầu phải có mật khẩu; mật khẩu quyết định vai trò (shop / kho / chu).
- *  - Chỉ đọc 2 sheet: "Tháng M/YYYY" (tháng hiện tại) và "Tồn tháng <tháng trước>".
- *  - Chỉ ghi vào sheet của bạn: cột J, K (Đã đóng / Đã giao), thêm dòng mới ở cuối, cột H sheet tồn.
- *  - Không xoá dòng nào của bạn. Mỗi lần ghi kiểm tra dòng còn đúng sản phẩm/size/màu/mã đơn, lệch thì bỏ qua.
- *  - Dữ liệu riêng của app nằm ở 3 sheet mới App_BinhLuan, App_LienKet, App_NhatKy (tự tạo, ở cuối).
+ * Nếu Apps Script được tạo từ "Tiện ích mở rộng → Apps Script" ngay trong Sheet thì để SHEET_ID trống.
+ * Nếu tạo từ script.google.com (dự án độc lập) thì BẮT BUỘC dán ID của Sheet vào SHEET_ID,
+ * không thì sẽ báo lỗi "không mở được sheet".
  */
 const PASSWORDS = { shop: '__PW_SHOP__', kho: '__PW_KHO__', chu: '__PW_CHU__' };
+const SHEET_ID = '';   // ID của Google Sheet: đoạn giữa /d/ và /edit trong link của Sheet
 
-const TZ = Session.getScriptTimeZone();
-const ORDER_COLS = ['J', 'K'];
-const STOCK_COLS = ['H'];
-const TAB_CMT = 'App_BinhLuan', TAB_LINK = 'App_LienKet', TAB_LOG = 'App_NhatKy';
+const TAB = { ORD: 'Đơn hàng', STK: 'Tồn kho', CMT: 'Bình luận', LOG: 'Nhật ký', CAT: 'Danh mục' };
+const ORD = { id: 'ID', date: 'Ngày', product: 'Sản phẩm', size: 'Size', color: 'Màu', code: 'Mã đơn', kem: 'Đóng kèm', src: 'Nguồn', st: 'Trạng thái', by: 'Người tạo', upd: 'Cập nhật lúc', note: 'Ghi chú' };
+const STK = { id: 'ID', date: 'Ngày nhập', type: 'Loại', product: 'Sản phẩm', size: 'Size', color: 'Màu', ref: 'Mã đơn hoàn', st: 'Tình trạng', used: 'Ngày dùng', forOrder: 'Dùng cho đơn (ID)', note: 'Ghi chú' };
+const STATUSES = ['Chờ đóng', 'Đã đóng', 'Đã giao', 'Không có hàng'];
+const ROLE_NAME = { shop: 'Shop', kho: 'Kho', chu: 'Chủ' };
 
+/* ---------- Điểm vào ---------- */
 function doGet() { return out({ ok: true }); }
 
 function doPost(e) {
@@ -26,10 +26,10 @@ function doPost(e) {
   try { p = JSON.parse(e.postData.contents); } catch (err) { return out({ error: 'JSON lỗi' }); }
   const role = roleOf(p.pw);
   if (!role) return out({ error: 'Sai mật khẩu' });
+  if (p.action === 'login') return out({ role: role });
   const lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
-    if (p.action === 'login') return out({ role: role });
     if (p.action === 'load') return out(load(role));
     if (p.action === 'write') return out(write(p, role));
     return out({ error: 'Action không hợp lệ' });
@@ -44,164 +44,217 @@ function roleOf(pw) {
   return null;
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------- Mở sheet / bảng ---------- */
+let _ss = null;
+function book() {
+  if (_ss) return _ss;
+  _ss = SHEET_ID ? SpreadsheetApp.openById(SHEET_ID) : SpreadsheetApp.getActive();
+  if (!_ss) throw new Error('Script chưa gắn với Google Sheet. Hãy dán ID của Sheet vào SHEET_ID ở đầu file script.');
+  return _ss;
+}
+const tz = () => book().getSpreadsheetTimeZone();
+const fmt = (d, f) => Utilities.formatDate(d, tz(), f);
 const pad = n => (n < 10 ? '0' : '') + n;
-const nowStr = () => Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd'T'HH:mm:ss");
-const col = L => L.charCodeAt(0) - 64;   // 'A' -> 1
 
-/* ---------- Tìm sheet ---------- */
-function findSheets() {
-  const ss = SpreadsheetApp.getActive(), now = new Date();
-  const m = now.getMonth() + 1, y = now.getFullYear(), pm = m === 1 ? 12 : m - 1;
-  const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-  const by = {}; ss.getSheets().forEach(s => by[norm(s.getName())] = s);
-  const orders = by[norm('Tháng ' + m + '/' + y)] || by[norm('Tháng ' + pad(m) + '/' + y)];
-  const stock = by[norm('Tồn tháng ' + pm)] || by[norm('Tồn tháng ' + pad(pm))];
-  if (!orders) throw new Error('Không thấy sheet "Tháng ' + m + '/' + y + '". Hãy tạo sheet tháng mới.');
-  return { orders: orders, stock: stock || null };
-}
-function tab(name, header) {
-  const ss = SpreadsheetApp.getActive();
+// Đọc cả bảng vào bộ nhớ: {sh, h: {tên cột -> số cột (1..)}, rows: mảng giá trị (dòng 2 trở đi)}
+function table(name, spec, create) {
+  const ss = book();
   let sh = ss.getSheetByName(name);
-  if (!sh) { sh = ss.insertSheet(name, ss.getNumSheets()); sh.appendRow(header); sh.setFrozenRows(1); }
-  return sh;
+  if (!sh) {
+    if (!create) throw new Error('Không thấy tab "' + name + '". Hãy dùng đúng file Excel mẫu và không đổi tên tab.');
+    sh = ss.insertSheet(name, ss.getNumSheets()); sh.appendRow(create); sh.setFrozenRows(1);
+  }
+  const last = Math.max(sh.getLastRow(), 1), width = Math.max(sh.getLastColumn(), 1);
+  const vals = sh.getRange(1, 1, last, width).getValues();
+  const h = {};
+  vals[0].forEach((v, i) => { if (v !== '') h[String(v).trim()] = i + 1; });
+  if (spec) Object.keys(spec).forEach(k => { if (!h[spec[k]]) throw new Error('Tab "' + name + '" thiếu cột "' + spec[k] + '". Không đổi tên hay xóa cột ở dòng 1.'); });
+  return { sh: sh, h: h, vals: vals, width: width };
 }
+const cellOf = (t, r, header) => t.vals[r][t.h[header] - 1];   // r: chỉ số trong vals (0 = dòng tiêu đề)
 
-/* ---------- Đọc ---------- */
-function cell(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+function norm(v) {
+  if (v instanceof Date) return fmt(v, 'HH:mm:ss') === '00:00:00' ? fmt(v, 'yyyy-MM-dd') : fmt(v, "yyyy-MM-dd'T'HH:mm:ss");
   return v === null || v === undefined ? '' : v;
 }
-function readSheet(sh, lastCol, firstRow) {
-  const last = sh.getLastRow();
-  if (last < firstRow) return [];
-  const vals = sh.getRange(firstRow, 1, last - firstRow + 1, lastCol).getValues();
-  const rows = [];
-  vals.forEach((r, i) => {
-    if (!r.some(v => v !== '' && v !== null)) return;
-    const o = { row: firstRow + i };
-    r.forEach((v, c) => { const x = cell(v); if (x !== '') o[String.fromCharCode(65 + c)] = x; });
-    rows.push(o);
-  });
-  return rows;
+function rowObj(t, spec, r) {
+  const o = { _row: r + 1 };
+  Object.keys(spec).forEach(k => { o[k] = norm(cellOf(t, r, spec[k])); });
+  return o;
 }
-function readTab(name, header, maxRows) {
-  const sh = tab(name, header), last = sh.getLastRow();
-  if (last < 2) return [];
-  const from = Math.max(2, last - maxRows + 1);
-  return sh.getRange(from, 1, last - from + 1, header.length).getValues().map(r => r.map(cell));
+function setCell(t, r, header, value) {
+  t.sh.getRange(r + 1, t.h[header]).setValue(value);
+  t.vals[r][t.h[header] - 1] = value;
+}
+function toDate(s) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(s || '');
+  return m ? Utilities.parseDate(s, tz(), 'yyyy-MM-dd') : '';
+}
+const todayStr = () => fmt(new Date(), 'yyyy-MM-dd');
+const nowStr = () => fmt(new Date(), "yyyy-MM-dd'T'HH:mm:ss");
+
+/* ---------- Đọc ---------- */
+function nextId(t, prefix) {
+  let mx = 0;
+  for (let r = 1; r < t.vals.length; r++) {
+    const m = /^[A-Z](\d+)$/.exec(String(cellOf(t, r, 'ID')));
+    if (m) mx = Math.max(mx, +m[1]);
+  }
+  return () => prefix + ('000000' + (++mx)).slice(-6);
+}
+// Dòng nhập tay (chưa có ID) -> tự cấp ID và điền mặc định
+function fillMissing(t, spec, prefix, defaults) {
+  const gen = nextId(t, prefix);
+  for (let r = 1; r < t.vals.length; r++) {
+    if (String(cellOf(t, r, 'ID')).trim() !== '') continue;
+    if (String(cellOf(t, r, spec.product)).trim() === '') continue;      // dòng trống
+    setCell(t, r, 'ID', gen());
+    Object.keys(defaults).forEach(h => { if (String(cellOf(t, r, h)).trim() === '') setCell(t, r, h, defaults[h]); });
+  }
+}
+function readCats() {
+  const sh = book().getSheetByName(TAB.CAT);
+  const res = { products: [], sizes: [], colors: [], kems: [] };
+  if (!sh || sh.getLastRow() < 2) return res;
+  const v = sh.getRange(2, 1, Math.min(sh.getLastRow() - 1, 100), 4).getValues();
+  const col = i => v.map(r => r[i]).filter(x => String(x).trim() !== '').map(x => String(x).trim());
+  res.products = col(0); res.sizes = col(1); res.colors = col(2); res.kems = col(3);
+  return res;
+}
+function readLog(name, max) {
+  const t = table(name, null, ['Thời gian', 'Vai trò', name === TAB.CMT ? 'ID đơn' : 'Đối tượng', 'Nội dung']);
+  const out = [];
+  for (let r = Math.max(1, t.vals.length - max); r < t.vals.length; r++) out.push(t.vals[r].slice(0, 4).map(norm));
+  return out;
 }
 function load(role) {
-  const s = findSheets();
-  return {
-    role: role, serverTime: nowStr(),
-    ordersSheet: s.orders.getName(), stockSheet: s.stock ? s.stock.getName() : '',
-    orders: readSheet(s.orders, 11, 3), stock: s.stock ? readSheet(s.stock, 9, 5) : [],
-    comments: readTab(TAB_CMT, ['ts', 'role', 'key', 'text'], 3000),
-    links: readTab(TAB_LINK, ['key', 'stockRow', 'ts'], 5000),
-    log: readTab(TAB_LOG, ['ts', 'role', 'key', 'text'], 3000),
-  };
+  const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
+  fillMissing(o, ORD, 'D', { 'Nguồn': 'Mới', 'Trạng thái': 'Chờ đóng', 'Người tạo': 'Nhập tay trong Sheet' });
+  fillMissing(s, STK, 'T', { 'Tình trạng': 'Còn hàng' });
+  const orders = [], stock = [];
+  for (let r = 1; r < o.vals.length; r++) if (String(cellOf(o, r, ORD.id)).trim() !== '') orders.push(rowObj(o, ORD, r));
+  for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.id)).trim() !== '') stock.push(rowObj(s, STK, r));
+  return { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000) };
 }
 
 /* ---------- Ghi ---------- */
-function toDate(s) { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(s || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : (s || ''); }
-
-function lastDataRow(sh, letter, minRow) {
-  const last = sh.getLastRow();
-  if (last < minRow) return minRow - 1;
-  const v = sh.getRange(1, col(letter), last, 1).getValues();
-  for (let i = v.length - 1; i >= minRow - 1; i--) if (String(v[i][0]).trim() !== '') return i + 1;
-  return minRow - 1;
+function indexById(t) {
+  const m = {};
+  for (let r = 1; r < t.vals.length; r++) { const id = String(cellOf(t, r, 'ID')).trim(); if (id) m[id] = r; }
+  return m;
 }
-function snapshot(sh, lastCol) {
-  const last = sh.getLastRow();
-  return last < 1 ? [] : sh.getRange(1, 1, last, lastCol).getValues();
-}
-function matches(snap, row, expect) {
-  const r = snap[row - 1];
-  if (!r) return false;
-  return Object.keys(expect || {}).every(k => String(r[col(k) - 1]).trim() === String(expect[k]).trim());
+// Thêm nhiều dòng cuối bảng bằng một lần ghi. rowsByHeader: [{tên cột: giá trị}]
+function appendRows(t, rowsByHeader, textCols) {
+  if (!rowsByHeader.length) return;
+  const start = t.vals.length + 1;       // dòng sheet tiếp theo (vals đã gồm cả dòng trống ở cuối nếu có)
+  const block = rowsByHeader.map(o => { const line = []; for (let c = 1; c <= t.width; c++) line.push(''); Object.keys(o).forEach(h => { if (t.h[h]) line[t.h[h] - 1] = o[h]; }); return line; });
+  (textCols || []).forEach(h => { if (t.h[h]) t.sh.getRange(start, t.h[h], block.length, 1).setNumberFormat('@'); });
+  t.sh.getRange(start, 1, block.length, t.width).setValues(block);
+  block.forEach(l => t.vals.push(l));
 }
 
 function write(p, role) {
-  const s = findSheets();
-  const res = { sets: [], appends: [], stockSets: [], stockAppends: [] };
-  if ((p.appends || []).length && role === 'kho') throw new Error('Vai trò Kho không được thêm đơn');
-  if ((p.stockAppends || []).length && role === 'shop') throw new Error('Vai trò Shop không được nhập kho');
+  const ops = p.ops || [];
+  const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
+  const oIdx = indexById(o), sIdx = indexById(s);
+  const newOrderId = nextId(o, 'D'), newStockId = nextId(s, 'T');
+  const logRows = [], cmtRows = [], results = [];
+  const now = nowStr(), nowD = Utilities.parseDate(now, tz(), "yyyy-MM-dd'T'HH:mm:ss");
+  const log = (target, text) => logRows.push([nowD, ROLE_NAME[role], target, String(text).slice(0, 500)]);
+  const fail = msg => ({ ok: false, error: msg });
 
-  // Sheet đơn
-  const oSnap = snapshot(s.orders, 11);
-  (p.sets || []).forEach(x => {
-    const bad = !(x.row >= 3) || Object.keys(x.cells).some(c => ORDER_COLS.indexOf(c) < 0);
-    if (bad || !matches(oSnap, x.row, x.expect)) return res.sets.push({ ok: false });
-    const c = x.cells;
-    if ('J' in c && 'K' in c) s.orders.getRange(x.row, 10, 1, 2).setValues([[c.J, c.K]]);
-    else Object.keys(c).forEach(k => s.orders.getRange(k + x.row).setValue(c[k]));
-    res.sets.push({ ok: true });
+  let touched = false;
+  const touch = r => { setCell(o, r, ORD.upd, nowD); touched = true; };
+  const freeStockOf = (orderId) => {
+    let freed = false;
+    for (let r = 1; r < s.vals.length; r++) {
+      if (String(cellOf(s, r, STK.forOrder)) === orderId && cellOf(s, r, STK.st) === 'Đã dùng') {
+        setCell(s, r, STK.st, 'Còn hàng'); setCell(s, r, STK.used, ''); setCell(s, r, STK.forOrder, '');
+        log(String(cellOf(s, r, STK.id)), 'Trả lại kho (hoàn tác đơn ' + orderId + ')');
+        freed = true;
+      }
+    }
+    if (freed && oIdx[orderId]) setCell(o, oIdx[orderId], ORD.src, 'Mới');   // không còn dùng hàng tồn nữa
+  };
+
+  ops.forEach(op => {
+    try {
+      if (op.t === 'order.add') {
+        if (role === 'kho') return results.push(fail('Vai trò Kho không được thêm đơn'));
+        const id = newOrderId();
+        const row = {}; row[ORD.id] = id; row[ORD.date] = toDate(op.date) || toDate(todayStr()); row[ORD.product] = op.product;
+        row[ORD.size] = +op.size || op.size; row[ORD.color] = op.color; row[ORD.code] = String(op.code || ''); row[ORD.kem] = op.kem || '';
+        row[ORD.src] = 'Mới'; row[ORD.st] = 'Chờ đóng'; row[ORD.by] = ROLE_NAME[role]; row[ORD.upd] = nowD; row[ORD.note] = op.note || '';
+        let res = { ok: true, id: id };
+        if (op.stockId) {
+          const sr = sIdx[op.stockId];
+          if (sr && cellOf(s, sr, STK.st) !== 'Đã dùng') {
+            row[ORD.src] = 'Hàng tồn';
+            setCell(s, sr, STK.st, 'Đã dùng'); setCell(s, sr, STK.used, toDate(todayStr())); setCell(s, sr, STK.forOrder, id);
+            log(op.stockId, 'Dùng cho đơn ' + id);
+          } else res.stockTaken = true;       // đôi tồn đã bị người khác dùng trước
+        }
+        appendRows(o, [row], [ORD.code]); oIdx[id] = o.vals.length - 1;
+        log(id, 'Tạo đơn' + (row[ORD.src] === 'Hàng tồn' ? ' (dùng hàng tồn)' : ''));
+        return results.push(res);
+      }
+      if (op.t === 'order.status') {
+        const r = oIdx[op.id];
+        if (!r) return results.push(fail('Không thấy đơn ' + op.id));
+        if (STATUSES.indexOf(op.status) < 0) return results.push(fail('Trạng thái không hợp lệ'));
+        const cur = String(cellOf(o, r, ORD.st));
+        if (op.from && cur !== op.from) return results.push({ ok: false, conflict: true, current: cur });
+        if (role === 'shop' && op.status !== 'Đã giao' && op.status !== 'Chờ đóng') return results.push(fail('Shop không được đổi sang trạng thái này'));
+        if (op.status === 'Chờ đóng' && cur !== 'Không có hàng') freeStockOf(op.id);
+        setCell(o, r, ORD.st, op.status); touch(r);
+        log(op.id, cur + ' → ' + op.status);
+        return results.push({ ok: true });
+      }
+      if (op.t === 'stock.add') {
+        if (role === 'shop') return results.push(fail('Shop không được nhập kho'));
+        const ids = [], rows = [];
+        for (let i = 0; i < Math.min(+op.n || 1, 50); i++) {
+          const id = newStockId(); ids.push(id);
+          const row = {}; row[STK.id] = id; row[STK.date] = toDate(op.date) || toDate(todayStr()); row[STK.type] = op.type === 'du' ? 'Hàng lấy dư' : 'Hàng hoàn';
+          row[STK.product] = op.product; row[STK.size] = +op.size || op.size; row[STK.color] = op.color; row[STK.ref] = String(op.ref || ''); row[STK.st] = 'Còn hàng';
+          rows.push(row);
+        }
+        appendRows(s, rows, [STK.ref]); ids.forEach(id => { sIdx[id] = s.vals.length - ids.length + ids.indexOf(id); });
+        log(ids[0], 'Nhập ' + ids.length + ' đôi ' + op.product + ' ' + op.size + ' ' + op.color);
+        return results.push({ ok: true, ids: ids });
+      }
+      if (op.t === 'stock.use' || op.t === 'stock.free') {
+        const r = sIdx[op.id];
+        if (!r) return results.push(fail('Không thấy dòng tồn ' + op.id));
+        if (op.t === 'stock.use') {
+          if (cellOf(s, r, STK.st) === 'Đã dùng') return results.push({ ok: false, conflict: true });
+          setCell(s, r, STK.st, 'Đã dùng'); setCell(s, r, STK.used, toDate(todayStr()));
+          log(op.id, 'Đánh dấu đã dùng');
+        } else {
+          setCell(s, r, STK.st, 'Còn hàng'); setCell(s, r, STK.used, ''); setCell(s, r, STK.forOrder, '');
+          log(op.id, 'Hoàn tác, trả lại kho');
+        }
+        return results.push({ ok: true });
+      }
+      if (op.t === 'comment') {
+        if (!oIdx[op.orderId]) return results.push(fail('Không thấy đơn'));
+        cmtRows.push([nowD, ROLE_NAME[role], op.orderId, String(op.text || '').slice(0, 2000)]);
+        return results.push({ ok: true });
+      }
+      results.push(fail('Thao tác không hợp lệ'));
+    } catch (err) { results.push(fail(String(err && err.message || err))); }
   });
-  const aps = p.appends || [];
-  if (aps.length) {
-    let row = lastDataRow(s.orders, 'B', 3) + 1, lastDate = '';
-    for (let r = oSnap.length; r >= 3; r--) { const v = oSnap[r - 1][0]; if (v instanceof Date) { lastDate = Utilities.formatDate(v, TZ, 'yyyy-MM-dd'); break; } }
-    const start = row, block = [];
-    aps.forEach(x => {
-      const v = x.vals || {}, line = [];
-      'ABCDEFGHIJK'.split('').forEach(L => {
-        let val = v[L] === undefined ? '' : v[L];
-        if (L === 'A') { if (val && val !== lastDate) { lastDate = val; val = toDate(val); } else val = ''; }
-        line.push(val);
-      });
-      block.push(line); res.appends.push({ ok: true, row: row++ });
-    });
-    s.orders.getRange(start, 1, block.length, 11).setValues(block);
-  }
 
-  // Sheet tồn
-  if (s.stock) {
-    const sSnap = snapshot(s.stock, 9);
-    (p.stockSets || []).forEach(x => {
-      const bad = !(x.row >= 5) || Object.keys(x.cells).some(c => STOCK_COLS.indexOf(c) < 0);
-      if (bad || !matches(sSnap, x.row, x.expect)) return res.stockSets.push({ ok: false });
-      Object.keys(x.cells).forEach(k => s.stock.getRange(k + x.row).setValue(toDate(x.cells[k])));
-      res.stockSets.push({ ok: true });
-    });
-    const sa = p.stockAppends || [];
-    if (sa.length) {
-      let row = lastDataRow(s.stock, 'E', 5) + 1;
-      const start = row, block = [];
-      sa.forEach(x => {
-        const v = x.vals || {};
-        block.push(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'].map(L => L === 'B' ? toDate(v.B) : (v[L] === undefined ? '' : v[L])));
-        res.stockAppends.push({ ok: true, row: row++ });
-      });
-      s.stock.getRange(start, 1, block.length, 9).setValues(block);
-    }
-  } else if ((p.stockSets || []).length || (p.stockAppends || []).length) {
-    (p.stockSets || []).forEach(() => res.stockSets.push({ ok: false }));
-    (p.stockAppends || []).forEach(() => res.stockAppends.push({ ok: false }));
-  }
-
-  // Dữ liệu riêng của app
-  const keyOf = x => x.key || (x.append != null && aps[x.append] ? (aps[x.append].vals.E || 'r' + res.appends[x.append].row) : '');
-  const ts = nowStr();
-  if ((p.comments || []).length) {
-    const sh = tab(TAB_CMT, ['ts', 'role', 'key', 'text']);
-    p.comments.forEach(x => sh.appendRow([ts, role, keyOf(x), String(x.text || '').slice(0, 2000)]));
-  }
-  if ((p.log || []).length) {
-    const sh = tab(TAB_LOG, ['ts', 'role', 'key', 'text']);
-    p.log.forEach(x => sh.appendRow([ts, role, keyOf(x), String(x.text || '').slice(0, 500)]));
-  }
-  if ((p.unlinks || []).length) {
-    const sh = tab(TAB_LINK, ['key', 'stockRow', 'ts']), last = sh.getLastRow();
-    if (last >= 2) {
-      const keys = sh.getRange(2, 1, last - 1, 1).getValues();
-      for (let i = keys.length - 1; i >= 0; i--) if (p.unlinks.indexOf(String(keys[i][0])) >= 0) sh.deleteRow(i + 2);   // chỉ xoá dòng trong sheet riêng của app
-    }
-  }
-  if ((p.links || []).length) {
-    const sh = tab(TAB_LINK, ['key', 'stockRow', 'ts']);
-    p.links.forEach(x => sh.appendRow([keyOf(x), x.stockRow, ts]));
-  }
+  const appendTab = (name, header, rows) => {
+    if (!rows.length) return;
+    const t = table(name, null, header), start = t.vals.length + 1;
+    t.sh.getRange(start, 1, rows.length, 4).setValues(rows);
+    t.sh.getRange(start, 1, rows.length, 1).setNumberFormat('dd/mm/yyyy hh:mm:ss');
+  };
+  if (touched) o.sh.getRange(2, o.h[ORD.upd], Math.max(o.vals.length - 1, 1), 1).setNumberFormat('dd/mm/yyyy hh:mm');
+  appendTab(TAB.CMT, ['Thời gian', 'Vai trò', 'ID đơn', 'Nội dung'], cmtRows);
+  appendTab(TAB.LOG, ['Thời gian', 'Vai trò', 'Đối tượng', 'Nội dung'], logRows);
   SpreadsheetApp.flush();
-  return res;
+  return { results: results };
 }
