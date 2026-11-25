@@ -42,6 +42,21 @@ async function api(action, x = {}) {
   if (j.error) throw new Error(j.error);
   return j;
 }
+const mapOrders = arr => (arr || []).map(o => ({
+    id: o.id, date: String(o.date).slice(0, 10), product: o.product, size: String(o.size), color: normColor(o.color), code: String(o.code || '').trim(),
+    kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
+  })).filter(o => o.product);
+const mapStock = arr => (arr || []).map(x => ({
+    id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : x.type === 'Nhập mới' ? 'moi' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
+    ref: String(x.ref || ''), state: x.st === 'Đã dùng' ? 'used' : x.st === 'Lỗi' ? 'loi' : x.st === 'Thất thoát' ? 'mat' : 'con', used: x.st === 'Đã dùng',
+    usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''), note: String(x.note || '').trim(),
+  })).filter(x => x.product);
+// Dữ liệu lần tải gần nhất được giữ trên máy để lần sau mở app hiện ngay (xoá khi đăng xuất)
+const CACHE_KEY = 'tts-cache';
+let LAST = null;
+function saveCache(d) { LAST = d; try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch { /* bỏ qua: đầy bộ nhớ thì thôi */ } }
+function readCache() { try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch { return null; } }
+const typing = () => { const ae = document.activeElement; return !!(ae && ae.closest && ae.closest('#main') && /INPUT|TEXTAREA/.test(ae.tagName)); };
 function build(d) {
   const lc = x => String(x || '').toLowerCase().trim();
   const c = d.cats || {};
@@ -49,15 +64,9 @@ function build(d) {
   if (c.sizes && c.sizes.length) SIZES = c.sizes.map(String);
   if (c.colors && c.colors.length) BASE_COLORS = c.colors.map(normColor);
   if (c.kems && c.kems.length) KEMS = ['', ...c.kems.map(lc)];
-  S.orders = d.orders.map(o => ({
-    id: o.id, date: String(o.date).slice(0, 10), product: o.product, size: String(o.size), color: normColor(o.color), code: String(o.code || '').trim(),
-    kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
-  })).filter(o => o.product);
-  S.stock = d.stock.map(x => ({
-    id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : x.type === 'Nhập mới' ? 'moi' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
-    ref: String(x.ref || ''), state: x.st === 'Đã dùng' ? 'used' : x.st === 'Lỗi' ? 'loi' : x.st === 'Thất thoát' ? 'mat' : 'con', used: x.st === 'Đã dùng',
-    usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''), note: String(x.note || '').trim(),
-  })).filter(x => x.product);
+  S.orders = mapOrders(d.orders);
+  S.stock = mapStock(d.stock);
+  S.rev = d.rev || null;
   S.comments = d.comments.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
   S.log = d.log.map(([ts, who, k, text]) => ({ ts: Date.parse(ts) || 0, who, key: String(k), text }));
   S.pricing = d.pricing || null;
@@ -85,21 +94,31 @@ let busy = 0, chain = Promise.resolve();
 // Ghi lên sheet lần lượt (không chạy song song), xong thì tải lại dữ liệu mới nhất.
 function save(ops) {
   busy++; setSync('Đang lưu…');
+  let fresh = false;
   chain = chain.then(() => api('write', { ops })).then(r => {
+    if (r.orders && r.stock) {
+      S.orders = mapOrders(r.orders); S.stock = mapStock(r.stock); S.rev = r.rev || S.rev;
+      if (LAST) { LAST.orders = r.orders; LAST.stock = r.stock; LAST.rev = r.rev; saveCache(LAST); }
+      fresh = !ops.some(o => /^(comment|pricing\.save|month\.close|stocktake\.save)$/.test(o.t));
+    }
     const rs = r.results || [];
     if (rs.some(x => x.stockTaken)) toast('Đôi tồn đã có người dùng trước nên đơn được tạo như hàng mới.');
     else if (rs.some(x => x.conflict)) toast('Có đơn vừa được người khác thay đổi. Đã tải lại dữ liệu mới nhất.');
     else { const bad = rs.find(x => x.error); if (bad) toast(bad.error); else if (rs.some(x => x.stockFreed)) toast('Đã đổi mẫu nên đôi tồn được trả lại kho.'); }
-  }).catch(e => toast(e.message)).then(async () => { busy--; if (!busy) await refresh(true); });
+  }).catch(e => toast(e.message)).then(async () => {
+    busy--;
+    if (busy) return;
+    if (fresh) { setSync('Đã lưu ' + new Date().toLocaleTimeString('vi-VN')); if (!typing()) render(); }
+    else await refresh(true);
+  });
   return chain;
 }
 async function refresh(force) {
   if (busy && !force) return;
   try {
-    build(await api('load'));
+    const d = await api('load'); build(d); saveCache(d);
     setSync('Đã đồng bộ ' + new Date().toLocaleTimeString('vi-VN'));
-    const ae = document.activeElement;
-    if (!(ae && ae.closest && ae.closest('#main') && /INPUT|TEXTAREA/.test(ae.tagName))) render();
+    if (!typing()) render();
   } catch (e) {
     if (/mật khẩu/i.test(e.message)) logout('Mật khẩu đã đổi, hãy đăng nhập lại.');
     else setSync('Mất kết nối – ' + e.message, true);
@@ -109,23 +128,29 @@ async function refresh(force) {
 /* ===== Đăng nhập ===== */
 function showLogin(msg) { $('#login').hidden = false; $('#login-err').textContent = msg || ''; $('#pw').focus(); }
 function logout(msg) {
-  try { localStorage.removeItem('tts-pw'); } catch { /* bỏ qua */ }
-  PW = ''; role = null; S = { orders: [], stock: [], comments: [], log: [], groups: [] };
+  try { localStorage.removeItem('tts-pw'); localStorage.removeItem(CACHE_KEY); } catch { /* bỏ qua */ }
+  LAST = null; PW = ''; role = null; S = { orders: [], stock: [], comments: [], log: [], groups: [] };
   $('#main').innerHTML = ''; $('#tabs').innerHTML = ''; $('#me').textContent = ''; $('#logout').hidden = true; $('#usermenu').hidden = true; setSync('');
   showLogin(msg);
 }
-async function enter() {
-  const j = await api('login');
-  role = j.role;
-  setSync('Đang tải…');
-  const d = await api('load'); build(d);
+function showApp(keepFilters) {
   $('#login').hidden = true; $('#me').textContent = ROLES[role]; $('#logout').hidden = false; $('#usermenu').hidden = false;
-  try { localStorage.setItem('tts-pw', PW); } catch { /* bỏ qua */ }
-  const dates = S.orders.map(o => o.date).sort();
-  F.date = S.orders.some(o => o.date === today()) ? today() : (dates[dates.length - 1] || '');
-  F.month = (dates[dates.length - 1] || today()).slice(0, 7);
-  setSync('Đã đồng bộ ' + new Date().toLocaleTimeString('vi-VN'));
+  if (!keepFilters) {
+    const dates = S.orders.map(o => o.date).sort();
+    F.date = S.orders.some(o => o.date === today()) ? today() : (dates[dates.length - 1] || '');
+    F.month = (dates[dates.length - 1] || today()).slice(0, 7);
+  }
   render();
+}
+async function enter(fromCache) {
+  setSync(fromCache ? 'Đang cập nhật…' : 'Đang tải…');
+  const d = await api('load');
+  if (!d.role) throw new Error('Không đọc được vai trò');
+  role = d.role; build(d); saveCache(d);
+  try { localStorage.setItem('tts-pw', PW); } catch { /* bỏ qua */ }
+  setSync('Đã đồng bộ ' + new Date().toLocaleTimeString('vi-VN'));
+  if (fromCache) { if (!typing() && $('#modal').hidden) render(); return; }
+  showApp();
 }
 $('#login-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -858,12 +883,37 @@ document.addEventListener('change', e => {
   if (t) { e.target.checked ? TICKS.add(t) : TICKS.delete(t); }
 });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
-setInterval(() => { if (role && !document.hidden && $('#modal').hidden) refresh(); }, 20000);
-document.addEventListener('visibilitychange', () => { if (role && !document.hidden && $('#modal').hidden) refresh(); });
+let pinging = false, ticks = 0;
+async function pollTick() {
+  if (!role || document.hidden || !$('#modal').hidden || busy || pinging) return;
+  pinging = true;
+  try {
+    const p = await api('ping');
+    ticks++;
+    // không có gì mới thì thôi; cứ ~2 phút tải lại 1 lần để thấy cả chỗ sửa tay trực tiếp trong Sheet
+    if (p.rev && S.rev && p.rev === S.rev && ticks % 8) return;
+    await refresh();
+  } catch (e) {
+    if (/mật khẩu/i.test(e.message)) logout('Mật khẩu đã đổi, hãy đăng nhập lại.');
+    else if (/không hợp lệ/i.test(e.message)) await refresh();   // backend cũ chưa có ping
+    else setSync('Mất kết nối – ' + e.message, true);
+  } finally { pinging = false; }
+}
+setInterval(pollTick, 15000);
+document.addEventListener('visibilitychange', pollTick);
 
 /* ===== Khởi động ===== */
 (async function init() {
   if (!API) { $('#main').innerHTML = '<div class="card warn">Chưa cấu hình: dán link Apps Script vào config.js (xem README.md).</div>'; return; }
-  if (PW) { try { await enter(); return; } catch (e) { PW = ''; showLogin(/mật khẩu/i.test(e.message) ? '' : 'Không kết nối được: ' + e.message); return; } }
+  if (PW) {
+    const c = readCache();
+    const cached = !!(c && c.role && c.orders);
+    if (cached) { role = c.role; build(c); LAST = c; showApp(); setSync('Đang cập nhật…'); }
+    try { await enter(cached); return; } catch (e) {
+      if (/mật khẩu/i.test(e.message)) { logout(''); return; }
+      if (cached) { setSync('Mất kết nối – đang xem dữ liệu lần trước', true); return; }
+      PW = ''; showLogin('Không kết nối được: ' + e.message); return;
+    }
+  }
   showLogin();
 })();

@@ -50,6 +50,7 @@ function doPost(e) {
   const role = roleOf(p.pw);
   if (!role) return out({ error: 'Sai mật khẩu' });
   if (p.action === 'login') return out({ role: role });
+  if (p.action === 'ping') return out({ rev: getRev() });          // app hỏi "dữ liệu có đổi không" – không mở Sheet
   const lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
@@ -67,6 +68,32 @@ function roleOf(pw) {
   return null;
 }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------- Phiên bản dữ liệu + bộ nhớ đệm (tăng tốc) ---------- */
+const CACHE_SEC = 120;                       // dữ liệu đọc được giữ tối đa 2 phút; ghi qua app hoặc sửa tay trong Sheet sẽ làm mới ngay
+function getRev() { return PropertiesService.getScriptProperties().getProperty('rev') || '0'; }
+function bumpRev() { PropertiesService.getScriptProperties().setProperty('rev', String(Date.now())); }
+// Chỉ chạy khi script gắn trực tiếp với Sheet (Tiện ích mở rộng → Apps Script). Script độc lập: app tự tải lại mỗi ~2 phút.
+function onEdit(e) { try { bumpRev(); } catch (err) { /* bỏ qua */ } }
+function cachePut(key, obj) {
+  try {
+    const str = JSON.stringify(obj), size = 30000, parts = {}, k = Math.ceil(str.length / size);
+    if (k > 60) return;
+    for (let i = 0; i < k; i++) parts[key + ':' + i] = str.substr(i * size, size);
+    parts[key] = String(k);
+    CacheService.getScriptCache().putAll(parts, CACHE_SEC);
+  } catch (err) { /* bỏ qua: không có cache thì đọc Sheet như thường */ }
+}
+function cacheGet(key) {
+  try {
+    const c = CacheService.getScriptCache(), k = +c.get(key);
+    if (!k) return null;
+    const keys = []; for (let i = 0; i < k; i++) keys.push(key + ':' + i);
+    const got = c.getAll(keys); let str = '';
+    for (let i = 0; i < keys.length; i++) { if (got[keys[i]] == null) return null; str += got[keys[i]]; }
+    return JSON.parse(str);
+  } catch (err) { return null; }
+}
 
 /* ---------- Mở sheet / bảng ---------- */
 let _ss = null;
@@ -89,8 +116,8 @@ function table(name, spec, create) {
     if (!create) throw new Error('Không thấy tab "' + name + '". Hãy dùng đúng file Excel mẫu và không đổi tên tab.');
     sh = ss.insertSheet(name, ss.getNumSheets()); sh.appendRow(create); sh.setFrozenRows(1);
   }
-  const last = Math.max(sh.getLastRow(), 1), width = Math.max(sh.getLastColumn(), 1);
-  const vals = sh.getRange(1, 1, last, width).getValues();
+  const vals = sh.getDataRange().getValues();                  // 1 lệnh đọc cả bảng (trước đây 3 lệnh)
+  const width = Math.max(vals[0].length, 1);
   const h = {};
   vals[0].forEach((v, i) => { if (v !== '') h[String(v).trim()] = i + 1; });
   if (spec) Object.keys(spec).forEach(k => { if (!h[spec[k]]) throw new Error('Tab "' + name + '" thiếu cột "' + spec[k] + '". Không đổi tên hay xóa cột ở dòng 1.'); });
@@ -141,11 +168,16 @@ function fillMissing(t, spec, prefix, defaults) {
 function readCats() {
   const sh = book().getSheetByName(TAB.CAT);
   const res = { products: [], sizes: [], colors: [], kems: [] };
-  if (!sh || sh.getLastRow() < 2) return res;
-  const v = sh.getRange(2, 1, Math.min(sh.getLastRow() - 1, 100), 4).getValues();
+  if (!sh) return res;
+  const v = sh.getDataRange().getValues().slice(1, 101).map(r => [r[0], r[1], r[2], r[3]]);
   const col = i => v.map(r => r[i]).filter(x => String(x).trim() !== '').map(x => String(x).trim());
   res.products = col(0); res.sizes = col(1); res.colors = col(2); res.kems = col(3);
   return res;
+}
+function listRows(t, spec) {
+  const out = [];
+  for (let r = 1; r < t.vals.length; r++) if (String(cellOf(t, r, spec.id)).trim() !== '') out.push(rowObj(t, spec, r));
+  return out;
 }
 function readLog(name, max) {
   const t = table(name, null, ['Thời gian', 'Vai trò', name === TAB.CMT ? 'ID đơn' : 'Đối tượng', 'Nội dung']);
@@ -178,6 +210,8 @@ function readTabN(name, header, max) {
 // Sheet tạo từ file Excel bản đầu: (1) thiếu trạng thái "Đã hủy", (2) cột Sản phẩm chặn không cho gõ tên ngoài danh sách.
 // Hai việc này tự bổ sung một lần (có đánh dấu để không lặp lại); lỗi thì bỏ qua, không ảnh hưởng chạy.
 function ensureSetup(o) {
+  const PROPS = PropertiesService.getScriptProperties();
+  if (PROPS.getProperty('setup_v4')) return;                  // đã cài đặt rồi thì bỏ qua
   try {
     const cat = book().getSheetByName(TAB.CAT);
     if (cat && o.h[ORD.st] && String(cat.getRange('E6').getValue()).trim() === '') {
@@ -217,8 +251,12 @@ function ensureSetup(o) {
       props.setProperty('setupV3', '1');
     }
   } catch (err) { /* bỏ qua */ }
+  try { PROPS.setProperty('setup_v4', '1'); } catch (err) { /* bỏ qua */ }
 }
 function load(role) {
+  const rev = getRev(), ck = 'L5:' + role + ':' + rev;
+  const hit = cacheGet(ck);
+  if (hit) { hit.cached = true; return hit; }
   const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
   ensureSetup(o);
   fillMissing(o, ORD, 'D', { 'Nguồn': 'Mới', 'Trạng thái': 'Chờ đóng', 'Người tạo': 'Nhập tay trong Sheet' });
@@ -228,6 +266,8 @@ function load(role) {
   for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.id)).trim() !== '') stock.push(rowObj(s, STK, r));
   const res = { role: role, serverTime: nowStr(), orders: orders, stock: stock, cats: readCats(), comments: readLog(TAB.CMT, 3000), log: readLog(TAB.LOG, 2000), checks: readTabN(TAB.CHK, CHK_HEADER, 400) };
   if (role === 'chu') { res.pricing = readPricing(); res.closes = readTabN(TAB.CLS, CLS_HEADER, 120); }   // giá và tiền chỉ trả về cho Chủ
+  res.rev = rev;
+  cachePut(ck, res);
   return res;
 }
 
@@ -493,5 +533,6 @@ function write(p, role) {
   appendTab(TAB.CMT, ['Thời gian', 'Vai trò', 'ID đơn', 'Nội dung'], cmtRows);
   appendTab(TAB.LOG, ['Thời gian', 'Vai trò', 'Đối tượng', 'Nội dung'], logRows);
   SpreadsheetApp.flush();
-  return { results: results };
+  if (ops.length) bumpRev();
+  return { results: results, rev: getRev(), orders: listRows(o, ORD), stock: listRows(s, STK) };
 }
