@@ -52,7 +52,7 @@ async function api(action, x = {}) {
 }
 const mapOrders = arr => (arr || []).map(o => ({
     id: o.id, date: String(o.date).slice(0, 10), product: o.product, size: String(o.size), color: normColor(o.color), code: String(o.code || '').trim(),
-    kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', notes: o.note ? [String(o.note)] : [],
+    kem: String(o.kem || '').trim(), note: String(o.note || '').trim(), fromStock: o.src === 'Hàng tồn', status: ST_TO_CODE[o.st] || 'moi', upd: String(o.upd || ''), notes: o.note ? [String(o.note)] : [],
   })).filter(o => o.product);
 const mapStock = arr => (arr || []).map(x => ({
     id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : x.type === 'Nhập mới' ? 'moi' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
@@ -183,7 +183,7 @@ function changeStatus(o, st, ops) {
     S.stock.filter(x => x.usedBy === o.id && x.used).forEach(x => { x.used = false; x.state = 'con'; x.usedDate = ''; x.usedBy = ''; });
     o.fromStock = false;
   }
-  o.status = st;
+  o.status = st; o.upd = new Date().toLocaleString('sv').replace(' ', 'T');
 }
 const has = (g, ...st) => g.items.some(i => st.includes(i.status));
 // Thao tác lên cả kiện: mỗi dòng chỉ đổi nếu đang ở trạng thái phù hợp
@@ -237,7 +237,7 @@ function render() {
   }).join('');
   ({ orders: vOrders, pack: vPack, stock: vStock, dash: vDash, close: vClose }[tab] || vOrders)();
 }
-const badge = s => `<span class="badge b-${s}">${ST[s]}</span>`;
+const badge = s => `<span class="badge b-${s}">${EASY() && s === 'da_dong' ? '✓ ' : ''}${ST[s]}</span>`;
 const opts = (arr, sel) => arr.map(v => `<option ${String(v) === String(sel) ? 'selected' : ''}>${esc(v)}</option>`).join('');
 function modal(html) { const m = $('#modal'); m.innerHTML = `<div class="mbox">${html}</div>`; m.hidden = false; }
 function closeModal() { $('#modal').hidden = true; NG = RET = CK = null; render(); }
@@ -253,7 +253,7 @@ function ordRow(g) {
   const nc = g.items.reduce((c, i) => c + S.comments.filter(x => x.key === i.id).length + i.notes.length, 0);
   const miss = g.active.filter(i => i.status === 'khong_co').length, hn = g.active.filter(i => i.status === 'hoan').length;
   const canEdit = can('shop') && (g.status !== 'da_giao' || role === 'chu');
-  return `<div class="ord"><div class="o-meta"><span class="o-date">${fmtD(g.date)}</span><span class="code">${esc(g.code) || '<span class="mut">—</span>'}</span>${g.active.length > 1 ? `<span class="tag">${g.active.length} đôi</span>` : ''}</div>
+  return `<div class="ord st-${g.status}"><div class="o-meta"><span class="o-date">${fmtD(g.date)}</span><span class="code">${esc(g.code) || '<span class="mut">—</span>'}</span>${g.active.length > 1 ? `<span class="tag">${g.active.length} đôi</span>` : ''}</div>
     <div class="o-items">${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
       ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</div>
     <div class="o-st">${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${hn && g.status !== 'hoan' ? `<div class="mut">${hn} đôi đã hoàn</div>` : ''}</div>
@@ -480,7 +480,12 @@ function vPackEasy() {
   const gs = S.groups.filter(g => has(g, 'moi')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   const lines = gs.flatMap(g => g.items.filter(i => i.status === 'moi'));
   const pick = {}; lines.forEach(i => pick[key(i)] = (pick[key(i)] || 0) + 1);
-  if (!gs.length) { $('#main').innerHTML = '<div class="done-all">🎉<b>Đã đóng hết đơn!</b><span>Có đơn mới app sẽ tự hiện ở đây.</span></div>'; return; }
+  const td = today(), doneG = S.groups.filter(g => !has(g, 'moi') && has(g, 'da_dong') && g.items.some(i => i.status === 'da_dong' && i.upd.startsWith(td)))
+    .sort((a, b) => Math.max(...b.items.map(i => +new Date(i.upd) || 0)) - Math.max(...a.items.map(i => +new Date(i.upd) || 0)));
+  const doneN = doneG.reduce((n, g) => n + g.items.filter(i => i.status === 'da_dong').length, 0);
+  const doneHtml = doneG.length ? `<div class="donesec"><div class="dh">✅ Đã đóng hôm nay: <b>${doneG.length}</b> đơn · <b>${doneN}</b> đôi</div>
+    ${doneG.map(g => `<div class="drow"><span class="dk">✓</span><div class="dinfo"><b>${g.code ? esc(fmtCode(g.code)) : '(chưa có mã)'}</b><span>${g.items.filter(i => i.status === 'da_dong').map(i => esc(`${i.product} · Size ${i.size} · ${cap(i.color)}`)).join('<br>')}</span></div><button class="btn" data-a="g:undo" data-g="${g.id}">Hoàn tác</button></div>`).join('')}</div>` : '';
+  if (!gs.length) { $('#main').innerHTML = '<div class="done-all">🎉<b>Đã đóng hết đơn!</b><span>Có đơn mới app sẽ tự hiện ở đây.</span></div>' + doneHtml; return; }
   $('#main').innerHTML = `<div class="ehead">Còn <b>${gs.length}</b> đơn cần đóng · <b>${lines.length}</b> đôi</div>
   <details class="card pick"><summary>📋 Xem danh sách lấy hàng <span class="mut">(${Object.keys(pick).length} mẫu)</span></summary>
     <div class="picklist">${Object.entries(pick).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<div><span>${esc(p)} · Size <b>${esc(s)}</b> · ${esc(cap(c))}</span><b class="x">× ${n}</b></div>`; }).join('')}</div></details>
@@ -494,7 +499,7 @@ function vPackEasy() {
         ${multi ? (i.status === 'moi' ? `<button class="btn bad" data-a="line:khong_co" data-id="${i.id}">Hết hàng</button>` : `<button class="btn" data-a="line:moi" data-id="${i.id}">Có hàng lại</button>`) : ''}</div>`).join('')}
       ${n ? `<button class="btn big ok" data-a="g:close" data-g="${g.id}">✓ Đã đóng xong${n > 1 ? ` (${n} đôi)` : ''}</button>` : ''}
       <div class="esub">${!multi && n ? `<button class="btn bad" data-a="g:unavail" data-g="${g.id}">✗ Hết hàng</button>` : ''}<button class="btn" data-a="cm" data-g="${g.id}">💬 Nhắn tin</button></div></div>`;
-  }).join('')}`;
+  }).join('')}${doneHtml}`;
 }
 function vPack() {
   if (EASY()) return vPackEasy();

@@ -302,3 +302,18 @@ body.easy nav .cnt{font-style:normal;background:var(--bad);color:#fff;border-rad
   .eln.out>.btn{margin-left:0}
 }
 @media(min-width:641px){body.easy main{max-width:780px}}
+/* ---- Kho: "Đã đóng" nổi bật màu xanh lá ---- */
+body.easy .b-da_dong{background:var(--ok);color:#fff;font-weight:700}
+body.easy .ord.st-da_dong{background:var(--okbg);box-shadow:inset 6px 0 0 var(--ok)}
+body.easy .chip[data-st=da_dong]{border-color:var(--ok);color:var(--ok);font-weight:600}
+body.easy .chip[data-st=da_dong].on{background:var(--ok);color:#fff}
+.donesec{margin-top:22px;background:var(--okbg);border:2px solid var(--ok);border-radius:16px;padding:14px 16px}
+.donesec .dh{font-size:19px;color:var(--ok);font-weight:600;margin-bottom:6px}
+.donesec .dh b{font-size:22px}
+.drow{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid rgba(23,128,61,.25)}
+.drow .dk{flex:none;width:34px;height:34px;border-radius:99px;background:var(--ok);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+.drow .dinfo{flex:1;min-width:0;display:flex;flex-direction:column}
+.drow .dinfo b{font-family:ui-monospace,Consolas,monospace;font-size:18px}
+.drow .dinfo span{font-size:16px}
+.drow .btn{min-height:44px;font-size:15px;padding:6px 12px;background:var(--card)}
+.done-all+.donesec{margin-top:0}
