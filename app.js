@@ -257,7 +257,7 @@ function ordRow(g) {
     <div class="o-items">${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
       ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</div>
     <div class="o-st">${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${hn && g.status !== 'hoan' ? `<div class="mut">${hn} đôi đã hoàn</div>` : ''}</div>
-    <div class="o-acts">${groupButtons(g)}<button class="btn sm ic" data-a="cm" data-g="${g.id}" title="Trao đổi">💬${EASY() ? ' Nhắn tin' : ''}${nc ? ' ' + nc : ''}</button>${canEdit ? `<button class="btn sm ic" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</div></div>`;
+    <div class="o-acts">${groupButtons(g)}<button class="btn sm ic" data-a="cm" data-g="${g.id}" title="Trao đổi">💬 ${EASY() ? 'Nhắn tin' : 'Nhắn'}${nc ? ` <b class="ncnt">${nc}</b>` : ''}</button>${canEdit ? `<button class="btn sm ic" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎ Sửa</button>` : ''}</div></div>`;
 }
 function vOrders() {
   const dates = [...new Set(S.groups.map(g => g.date))].sort().reverse();
@@ -278,7 +278,7 @@ function vOrders() {
 
 /* ===== Thêm đơn (nhiều đôi) ===== */
 let ADD = null;
-const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '40', color: '', kem: '', note: '', qty: 1, src: 'new', stockIds: [], autoPick: false, custom: false, ...p });
+const newLine = (p = {}) => ({ product: PRODUCTS[0], size: '', color: '', kem: '', note: '', qty: 1, src: 'new', stockIds: [], autoPick: false, custom: false, ...p });
 // Sản phẩm: chọn trong danh sách (chủ yếu) hoặc "Khác" để gõ tên tự do. a = tên thuộc tính data-k / data-e
 const isCustomProd = l => l.custom || (l.product && !PRODUCTS.includes(l.product));
 const prodHtml = (l, a) => { const c = isCustomProd(l); return `<select ${a}="productSel">${opts(PRODUCTS, c ? '' : l.product)}<option value="__other__" ${c ? 'selected' : ''}>Khác (gõ tên)…</option></select>`; };
@@ -287,35 +287,43 @@ const sizeList = () => `<datalist id="dl-size">${SIZES.map(v => `<option value="
 const canon = nm => PRODUCTS.find(p => p.toLowerCase() === String(nm).trim().toLowerCase()) || String(nm).trim();
 const kemList = () => `<datalist id="dl-kem">${KEMS.filter(Boolean).map(k => `<option value="${esc(k)}">`).join('')}</datalist>`;
 function lineHtml(l, i) {
-  return `<div class="aline" data-i="${i}">
-    ${prodHtml(l, 'data-k')}
-    <input data-k="size" list="dl-size" value="${esc(l.size)}" placeholder="size">
-    <input data-k="color" list="dl-color" value="${esc(l.color)}" placeholder="màu">
-    <input data-k="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="đóng kèm (tuỳ ý)">
-    <input data-k="qty" type="number" min="1" max="20" value="${l.qty}" title="Số đôi giống nhau">
-    ${ADD.lines.length > 1 ? `<button class="btn sm bad" data-a="al-del" data-i="${i}" title="Bỏ dòng này">✕</button>` : '<span></span>'}
-    ${prodOther(l, 'data-k')}
-    ${l.note || l.showNote ? `<input data-k="note" class="wide" value="${esc(l.note)}" placeholder="Ghi chú cho đôi này">` : ''}
-    <div class="srcrow wide"><span class="mut">Nguồn:</span>
+  const many = ADD.lines.length > 1;
+  return `<div class="aline v2" data-i="${i}">
+    ${many ? `<div class="ahead"><b>Đôi ${i + 1}</b>${ADD.lines.length > 1 ? `<button class="linkbtn bad" data-a="al-del" data-i="${i}">✕ Bỏ dòng này</button>` : ''}</div>` : ''}
+    <div class="agrid">
+      <label class="f-prod"><span>Sản phẩm</span>${prodHtml(l, 'data-k')}</label>
+      <label class="f-size"><span>Size</span><input data-k="size" list="dl-size" inputmode="numeric" value="${esc(l.size)}" placeholder="vd: 41"></label>
+      <label class="f-color"><span>Màu</span><input data-k="color" list="dl-color" value="${esc(l.color)}" placeholder="vd: xanh rêu"></label>
+      <label class="f-qty"><span>Số đôi</span><input data-k="qty" type="number" min="1" max="20" inputmode="numeric" value="${l.qty}" title="Số đôi giống hệt nhau"></label>
+      <label class="f-kem"><span>Đóng kèm <i>(nếu có)</i></span><input data-k="kem" list="dl-kem" value="${esc(l.kem)}" placeholder="vd: 2 tất đen + 1 bó gối"></label>
+      ${prodOther(l, 'data-k')}
+      ${l.note || l.showNote ? `<label class="wide"><span>Ghi chú cho đôi này</span><input data-k="note" value="${esc(l.note)}" placeholder="vd: đóng hộp riêng"></label>` : ''}
+    </div>
+    <div class="srcrow"><span class="mut">Lấy hàng:</span>
       <label><input type="radio" name="src-${i}" value="new" ${l.src === 'new' ? 'checked' : ''}> Hàng mới</label>
-      <label><input type="radio" name="src-${i}" value="stock" ${l.src === 'stock' ? 'checked' : ''}> Dùng tồn <span class="tag stock" id="sc-${i}"></span></label>${l.note || l.showNote ? '' : `<button type="button" class="linkbtn" data-a="al-note" data-i="${i}">+ ghi chú</button>`}</div>
+      <label id="sl-${i}"><input type="radio" name="src-${i}" value="stock" ${l.src === 'stock' ? 'checked' : ''}> Dùng tồn <span class="tag stock" id="sc-${i}"></span></label>${l.note || l.showNote ? '' : `<button type="button" class="linkbtn" data-a="al-note" data-i="${i}">+ ghi chú</button>`}</div>
     <div class="sugg-line" id="sg-${i}"></div></div>`;
 }
 function newOrderModal(pre = {}) {
   ADD = { date: pre.date || today(), code: pre.code || '', lines: [newLine(pre.line || {})], extra: !!pre.code };
-  const kemHint = 'Đóng kèm viết tự do, ví dụ: 2 tất đen + 1 bó gối';
   modal(`<h3>${pre.code ? 'Thêm đôi vào đơn ' + esc(pre.code) : 'Thêm đơn'}</h3>
   <div class="fld"><label>Ngày</label><input type="date" id="a-date" value="${ADD.date}"></div>
-  <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" value="${esc(ADD.code)}" placeholder="vd: 802123456789 (các đôi trong cùng đơn dùng chung mã)"></div>
+  <div class="fld"><label>Mã đơn</label><input id="a-code" inputmode="numeric" autocomplete="off" value="${esc(ADD.code)}" placeholder="vd: 802123456789"></div>
+  <div id="a-codewarn"></div>
   ${pre.code ? '' : '<div class="fld"><label>Ghi chú đơn</label><input id="a-note" placeholder="Ghi chú chung cho cả đơn (tuỳ chọn)"></div>'}
-  <div class="mut" style="margin:10px 0 4px">Hàng trong đơn</div>
+  <div class="sec-t">Hàng trong đơn</div>
   <datalist id="dl-color">${colorList().map(c => `<option value="${esc(c)}">`).join('')}</datalist>${kemList()}${sizeList()}
   <div id="alines"></div>
-  <div class="mut" style="font-size:12px;margin-top:4px">${kemHint}.</div>
-  <button class="btn sm" data-a="al-add" style="margin-top:6px">+ thêm đôi</button>
+  <button class="btn addline" data-a="al-add">+ Thêm đôi khác vào đơn này</button>
   <div id="a-sum" class="sum"></div>
-  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="save-order">Lưu đơn</button></div>`);
-  drawLines();
+  <div class="row"><button class="btn" data-a="close">Huỷ</button>${pre.code ? '' : '<button class="btn" data-a="save-next" title="Lưu đơn này rồi mở ngay form trống để nhập đơn tiếp theo">Lưu & nhập tiếp</button>'}<button class="btn pri" data-a="save-order" id="a-save">Lưu đơn</button></div>`);
+  drawLines(); codeWarn();
+  if (!pre.code) setTimeout(() => { const c = $('#a-code'); if (c && innerWidth > 640) c.focus(); }, 50);
+}
+function codeWarn() {
+  const el = $('#a-codewarn'), c = $('#a-code'); if (!el || !c || ADD.extra) return;
+  const code = c.value.replace(/D/g, ''), g = code.length >= 6 && S.groups.find(x => x.code === code);
+  el.innerHTML = g ? `<div class="warn">⚠ Mã này đã có đơn ngày ${fmtD(g.date)}: ${g.active.length} đôi, ${esc(ST[g.status])}. Lưu sẽ <b>thêm đôi vào đơn đó</b>.</div>` : '';
 }
 function drawLines() { $('#alines').innerHTML = ADD.lines.map(lineHtml).join(''); ADD.lines.forEach((_, i) => updSug(i)); }
 // Đôi tồn đúng mẫu của dòng i (trừ những đôi đã chọn ở dòng khác)
@@ -327,7 +335,8 @@ function availFor(i) {
 function updSug(i) {
   const l = ADD.lines[i], el = $('#sg-' + i), sc = $('#sc-' + i); if (!el) return;
   const av = availFor(i);
-  if (sc) sc.textContent = normColor(l.color) ? 'kho có ' + av.length : '';
+  if (sc) { const known = !!normColor(l.color) && String(l.size).trim(); sc.textContent = known ? (av.length ? 'kho có ' + av.length : 'kho hết') : ''; sc.classList.toggle('none', !!known && !av.length); }
+  const sr = document.querySelector(`#sl-${i} input`); if (sr) { const off = !!normColor(l.color) && !!String(l.size).trim() && !av.length && l.src !== 'stock'; sr.disabled = off; sr.parentElement.classList.toggle('off', off); }
   l.stockIds = l.stockIds.filter(id => av.some(s => s.id === id)).slice(0, l.qty);
   if (l.src === 'stock') {
     if (l.autoPick) { l.stockIds = av.slice(0, l.qty).map(s => s.id); l.autoPick = false; }
@@ -342,7 +351,8 @@ function updSug(i) {
 function updSum() {
   const el = $('#a-sum'); if (!el) return;
   const tot = ADD.lines.reduce((n, l) => n + l.qty, 0), st = ADD.lines.reduce((n, l) => n + (l.src === 'stock' ? Math.min(l.stockIds.length, l.qty) : 0), 0);
-  el.innerHTML = `Tổng <b>${tot}</b> đôi: <b>${st}</b> đôi dùng hàng tồn (trừ khỏi kho), <b>${tot - st}</b> đôi lấy hàng mới.`;
+  el.innerHTML = `Tổng <b>${tot}</b> đôi${st ? `: <b>${st}</b> đôi dùng hàng tồn (trừ khỏi kho), <b>${tot - st}</b> đôi lấy hàng mới` : ' · tất cả lấy hàng mới'}.`;
+  const sv = $('#a-save'); if (sv) sv.textContent = `Lưu đơn (${tot} đôi)`;
 }
 // Thêm nhiều dòng trong một lần ghi. items: [{d, stock}]
 function addOrders(items) {
@@ -352,7 +362,7 @@ function addOrders(items) {
   });
   return save(ops);
 }
-function saveOrder() {
+function saveOrder(next) {
   const date = $('#a-date').value, code = $('#a-code').value.replace(/\D/g, '');
   if (ADD.lines.some(l => !String(l.product).trim())) return toast('Dòng nào cũng cần có tên sản phẩm');
   if (ADD.lines.some(l => !String(l.size).trim())) return toast('Dòng nào cũng cần có size');
@@ -366,7 +376,9 @@ function saveOrder() {
   });
   const used = items.filter(i => i.stock).length;
   addOrders(items);
-  closeModal(); toast(`Đang thêm ${items.length} đôi vào Google Sheet${used ? ` (trừ ${used} đôi khỏi kho tồn)` : ''}…`);
+  const last = ADD.lines[ADD.lines.length - 1];
+  closeModal(); toast(`Đang thêm ${items.length} đôi${code ? ' – đơn ' + code : ''}${used ? ` (trừ ${used} đôi khỏi kho tồn)` : ''}…`);
+  if (next) newOrderModal({ date, line: { product: last.product, custom: last.custom } });
 }
 
 /* ===== Dán nhiều đơn ===== */
@@ -817,6 +829,7 @@ document.addEventListener('click', e => {
     case 'new': return newOrderModal();
     case 'bulk': return bulkModal();
     case 'save-order': return saveOrder();
+    case 'save-next': return saveOrder(true);
     case 'bulk-save': return bulkSave();
     case 'close': return closeModal();
     case 'al-add': { const p = ADD.lines[ADD.lines.length - 1]; ADD.lines.push(newLine({ product: p.product, color: p.color, kem: p.kem, size: p.size })); return drawLines(); }
@@ -898,6 +911,7 @@ document.addEventListener('input', e => {
     if (CK && el.id === 'ck-q') { const q = el.value.toLowerCase(); document.querySelectorAll('#ck-body tr').forEach(tr => { tr.style.display = !q || tr.dataset.ck[0] === 'x' || (tr.dataset.q || '').includes(q) ? '' : 'none'; }); return; }
     if (CK && el.dataset.ckv) { const arr = el.dataset.ckv[0] === 'r' ? CK.rows : CK.extra; arr[+el.dataset.ckv.slice(1)].actual = el.value; ckSum(); return; }
     if (CK && el.dataset.ckx) { CK.extra[+el.dataset.i][el.dataset.ckx] = el.value; return; }
+    if (ADD && el.id === 'a-code') return codeWarn();
     const row = el.closest('[data-i]'), i = row ? +row.dataset.i : -1;
     if (ADD && row && row.parentElement.id === 'alines') {
       const l = ADD.lines[i];

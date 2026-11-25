@@ -317,3 +317,44 @@ body.easy .chip[data-st=da_dong].on{background:var(--ok);color:#fff}
 .drow .dinfo span{font-size:16px}
 .drow .btn{min-height:44px;font-size:15px;padding:6px 12px;background:var(--card)}
 .done-all+.donesec{margin-top:0}
+
+/* ================= Shop: biểu mẫu Thêm đơn rõ ràng hơn ================= */
+.sec-t{font-weight:600;margin:14px 0 6px}
+.aline.v2{display:block;background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:10px 12px;margin:0 0 10px}
+.aline.v2:last-child{border-bottom:1px solid var(--bd)}
+.ahead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.ahead .linkbtn{margin:0}
+.linkbtn.bad{color:var(--bad)}
+.agrid{display:grid;grid-template-columns:2fr .8fr 1.3fr .7fr;gap:8px}
+.agrid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut);min-width:0}
+.agrid label i{font-style:normal;opacity:.8}
+.agrid input,.agrid select{width:100%}
+.agrid .f-kem,.agrid .wide{grid-column:1/-1}
+.agrid>input.wide{grid-column:1/-1;width:100%}
+.aline.v2 .srcrow{margin-top:8px}
+.aline.v2 .srcrow label.off{opacity:.45;cursor:not-allowed}
+.tag.stock.none{background:var(--bg);color:var(--mut);border:1px solid var(--bd)}
+.btn.addline{display:block;width:100%;border-style:dashed;color:var(--pri);background:none;margin-top:2px}
+#a-codewarn .warn{margin:6px 0 0}
+.ncnt{background:var(--pri);color:#fff;border-radius:99px;padding:0 6px;font-size:11px;margin-left:2px}
+@media(max-width:640px){
+  .agrid{grid-template-columns:1fr 1fr}
+  .agrid .f-prod{grid-column:1/-1}
+  .agrid .f-size{grid-column:span 1}
+  .agrid .f-qty{grid-column:span 1}
+  .agrid .f-color{grid-column:1/-1;order:3}
+  .agrid .f-kem{order:4}
+  .agrid .f-size{order:1}.agrid .f-qty{order:2}.agrid .f-prod{order:0}
+  .agrid>*:not(.f-prod):not(.f-size):not(.f-qty):not(.f-color):not(.f-kem){order:5}
+  .agrid label{font-size:13px}
+  .mbox .row .btn{padding-left:8px;padding-right:8px}
+}
+@media(max-width:640px){
+  .agrid{grid-template-columns:.9fr 1.6fr .8fr}
+  .agrid .f-prod,.agrid .f-kem,.agrid .wide,.agrid>input.wide{grid-column:1/-1}
+  .agrid .f-size,.agrid .f-color,.agrid .f-qty{grid-column:auto}
+  .agrid .f-prod{order:0}.agrid .f-size{order:1}.agrid .f-color{order:2}.agrid .f-qty{order:3}.agrid .f-kem{order:4}
+  .mbox .row [data-a=close]{flex:0 0 72px}
+  .mbox .row .btn{white-space:nowrap;font-size:15px}
+}
+.aline.v2 .srcrow{flex-wrap:wrap;gap:6px 14px}.aline.v2 .srcrow>*{white-space:nowrap}
