@@ -212,3 +212,93 @@ header{gap:10px 14px;padding:8px 16px}
 }
 .linkbtn{background:none;border:0;color:var(--pri);cursor:pointer;font:inherit;font-size:13px;padding:4px 0;margin-left:auto}
 details.card>summary{cursor:pointer}
+
+/* ================= Chế độ dễ dùng cho Kho (body.easy): chữ to, nút to, rõ ràng ================= */
+.toast .tbtn{display:block;margin:8px auto 0;background:#fff;color:#222;border:0;border-radius:8px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+body.easy{font-size:17px;line-height:1.5}
+body.easy .btn{min-height:48px;padding:10px 18px;font-size:17px;border-width:2px;border-radius:12px}
+body.easy .btn.sm{min-height:44px;font-size:16px;padding:8px 14px}
+body.easy .btn.bad{border-color:var(--badbg)}
+body.easy .badge{font-size:15px;padding:4px 12px}
+body.easy .tag{font-size:15px;padding:2px 9px}
+body.easy .chip{font-size:16px;padding:9px 16px}
+body.easy input,body.easy select,body.easy textarea{font-size:18px;min-height:50px;border-width:2px;border-radius:10px}
+body.easy input[type=checkbox]{min-height:0;width:24px;height:24px}
+body.easy .mut{color:var(--tx);opacity:.72}
+body.easy .code{font-size:16px}
+body.easy .um>summary{font-size:16px;color:var(--tx)}
+body.easy .toast{font-size:18px;padding:14px 20px;border-radius:14px;max-width:min(92vw,460px);text-align:center;bottom:24px}
+body.easy .mbox h3{font-size:22px}
+/* tiêu đề tóm tắt */
+.ehead{font-size:20px;margin:4px 2px 12px}
+.ehead b{font-size:24px;color:var(--pri)}
+/* danh sách lấy hàng */
+.pick>summary{font-size:18px;font-weight:600;padding:4px 0}
+.picklist div{display:flex;justify-content:space-between;gap:10px;padding:10px 2px;border-top:1px solid var(--bd)}
+.picklist div:first-child{margin-top:8px}
+.picklist .x{font-size:19px;white-space:nowrap}
+/* thẻ đơn cần đóng */
+.ecard{padding:16px;border-width:2px;border-radius:16px}
+.ecode{display:flex;flex-direction:column;gap:2px;padding-bottom:10px;border-bottom:2px solid var(--bd)}
+.ecode>span{font-size:15px}
+.ecode>b{font-family:ui-monospace,Consolas,monospace;font-size:24px;letter-spacing:.5px}
+.ecode .many{color:var(--warn);opacity:1}
+.eln{display:flex;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid var(--bd)}
+.eln:last-of-type{border-bottom:0}
+.einfo{flex:1;min-width:0}
+.pname{font-size:21px;font-weight:700;line-height:1.3}
+.pdet{font-size:19px;margin-top:2px}
+.pdet b{font-size:21px}
+.pkem{display:inline-block;margin-top:6px;background:var(--warnbg);color:var(--warn);padding:4px 10px;border-radius:8px;font-size:17px}
+.pstock{margin-top:4px;color:var(--ok);font-size:16px}
+.pnote{margin-top:6px;font-size:17px;background:var(--bg);padding:6px 10px;border-radius:8px}
+.pout{margin-top:6px;color:var(--bad);font-weight:600}
+.eln.out .pname,.eln.out .pdet{text-decoration:line-through;opacity:.55}
+.eln.done .einfo{opacity:.5}
+.eln.done .pname::after{content:'  ✓ đã lấy';color:var(--ok);font-size:16px;font-weight:600}
+.etick{display:flex;align-items:center;justify-content:center;min-width:48px;min-height:48px;cursor:pointer}
+.etick input{width:30px!important;height:30px!important;accent-color:var(--ok);cursor:pointer}
+.btn.big{display:block;width:100%;min-height:60px;margin-top:12px;font-size:20px;font-weight:700;border-radius:14px}
+.btn.big.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.esub{display:flex;gap:10px;margin-top:10px}
+.esub .btn{flex:1}
+.done-all{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:60px 16px;font-size:48px}
+.done-all b{font-size:24px}.done-all span{font-size:18px;color:var(--mut)}
+/* tồn kho: 3 nút lớn */
+.bigacts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px}
+.bigbtn{display:flex;align-items:center;gap:14px;text-align:left;background:var(--card);border:2px solid var(--bd);border-radius:16px;padding:14px 16px;cursor:pointer;min-height:76px}
+.bigbtn:hover{border-color:var(--pri)}
+.bigbtn .bi{flex:none;width:46px;height:46px;border-radius:12px;background:var(--pribg);color:var(--pri);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700}
+.bigbtn b{display:block;font-size:19px}
+.bigbtn small{display:block;font-size:15px;color:var(--mut);margin-top:2px}
+/* thanh tab có hình */
+body.easy nav button{position:relative;font-size:16px}
+body.easy nav .ti{margin-right:6px}
+body.easy nav .cnt{font-style:normal;background:var(--bad);color:#fff;border-radius:99px;font-size:13px;padding:1px 7px;margin-left:6px;font-weight:700}
+@media(max-width:640px){
+  body.easy{font-size:18px}
+  body.easy main{padding:12px 12px 110px}
+  body.easy nav{padding:6px 8px calc(8px + env(safe-area-inset-bottom))}
+  body.easy nav button{flex-direction:column;gap:2px;min-height:64px;font-size:15px;padding:4px 2px}
+  body.easy nav .ti{font-size:24px;margin:0;line-height:1}
+  body.easy nav .cnt{position:absolute;top:4px;right:calc(50% - 30px);margin:0}
+  body.easy .toast{bottom:100px}
+  body.easy .ord{padding:16px 14px}
+  body.easy .o-acts .btn{flex:1 1 auto}
+  body.easy .bar select{max-width:none;flex:1 1 100%}
+  .bigacts{grid-template-columns:1fr}
+  .eln{flex-wrap:wrap}
+  .eln>.btn{margin-left:auto}
+}
+.ecode .nocode{font-family:inherit;font-size:18px;color:var(--mut);letter-spacing:0}
+.bigbtn small.wn{color:var(--warn);font-weight:600}
+@media(max-width:640px){.mbox .row:not(:last-child){position:static;border:0;margin:8px 0;padding:0;background:none}}
+@media(max-width:640px){
+  body.easy .toast{width:min(92vw,460px)}
+  .eln{align-items:flex-start}
+  .etick{min-height:30px}
+  .eln .einfo{flex:1 1 calc(100% - 64px)}
+  .eln>.btn{margin-left:60px;min-height:44px;font-size:16px;padding:6px 16px}
+  .eln.out>.btn{margin-left:0}
+}
+@media(min-width:641px){body.easy main{max-width:780px}}

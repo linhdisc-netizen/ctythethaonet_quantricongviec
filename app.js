@@ -23,7 +23,15 @@ const fmtD = d => d ? d.slice(8) + '/' + d.slice(5, 7) : '';
 const normColor = s => (s || '').toLowerCase().replace(/[']/g, '').replace(/\s+/g, ' ').trim();
 const key = x => [x.product, x.size, x.color].join('|');
 const lineText = x => `${x.product} · ${x.size} · ${cap(x.color)}`;
-function toast(t) { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => e.hidden = true, 3200); }
+// act (không bắt buộc): { label, fn } – hiện thêm một nút trong thông báo (ví dụ "Bấm nhầm? Hoàn tác")
+function toast(t, act) {
+  const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(toast.t);
+  if (act) { const b = document.createElement('button'); b.className = 'tbtn'; b.textContent = act.label; b.onclick = () => { e.hidden = true; act.fn(); }; e.append(b); }
+  toast.t = setTimeout(() => e.hidden = true, act ? 8000 : 3200);
+}
+// Chế độ dễ dùng cho Kho: chữ to, nút to, ít lựa chọn
+const EASY = () => role === 'kho';
+const fmtCode = c => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');   // 802858498709 → 8028 5849 8709 cho dễ đọc
 function setSync(t, bad) { const e = $('#sync'); e.textContent = t; e.style.color = bad ? 'var(--bad)' : ''; $('#usermenu').classList.toggle('bad', !!bad); }
 
 /* ===== Dữ liệu ===== */
@@ -130,12 +138,15 @@ function showLogin(msg) { $('#login').hidden = false; $('#login-err').textConten
 function logout(msg) {
   try { localStorage.removeItem('tts-pw'); localStorage.removeItem(CACHE_KEY); } catch { /* bỏ qua */ }
   LAST = null; PW = ''; role = null; S = { orders: [], stock: [], comments: [], log: [], groups: [] };
+  document.body.classList.remove('easy');
   $('#main').innerHTML = ''; $('#tabs').innerHTML = ''; $('#me').textContent = ''; $('#logout').hidden = true; $('#usermenu').hidden = true; setSync('');
   showLogin(msg);
 }
 function showApp(keepFilters) {
   $('#login').hidden = true; $('#me').textContent = ROLES[role]; $('#logout').hidden = false; $('#usermenu').hidden = false;
+  document.body.classList.toggle('easy', EASY());
   if (!keepFilters) {
+    if (EASY()) tab = 'pack';             // Kho mở app là thấy ngay việc cần làm
     const dates = S.orders.map(o => o.date).sort();
     F.date = S.orders.some(o => o.date === today()) ? today() : (dates[dates.length - 1] || '');
     F.month = (dates[dates.length - 1] || today()).slice(0, 7);
@@ -177,7 +188,8 @@ function changeStatus(o, st, ops) {
 const has = (g, ...st) => g.items.some(i => st.includes(i.status));
 // Thao tác lên cả kiện: mỗi dòng chỉ đổi nếu đang ở trạng thái phù hợp
 function groupAction(g, act) {
-  const ops = [], mv = (st, ...from) => g.items.filter(i => from.includes(i.status)).forEach(i => changeStatus(i, st, ops));
+  const ops = [], changed = [];
+  const mv = (st, ...from) => g.items.filter(i => from.includes(i.status)).forEach(i => { changed.push({ i, from: i.status, to: st, stock: i.fromStock }); changeStatus(i, st, ops); });
   if (act === 'close') mv('da_dong', 'moi');
   else if (act === 'unavail') mv('khong_co', 'moi');
   else if (act === 'deliver') mv('da_giao', 'da_dong');
@@ -186,11 +198,21 @@ function groupAction(g, act) {
   else if (act === 'cancel') mv('huy', 'moi', 'khong_co', ...(role === 'chu' ? ['da_dong', 'da_giao'] : []));
   if (!ops.length) return toast('Không có gì để đổi');
   save(ops); render();
+  // Kho: luôn cho "Hoàn tác" ngay trong thông báo, phòng bấm nhầm (trừ đơn dùng hàng tồn – hoàn tác ở tab Đơn hàng)
+  const MSG = { close: 'Đã đóng xong', unavail: 'Đã báo hết hàng', deliver: 'Đã chuyển sang Đã giao' };
+  if (EASY() && MSG[act]) {
+    const text = g.code ? `Đơn ${fmtCode(g.code)}: ${MSG[act].toLowerCase()}` : MSG[act];
+    if (act === 'close' && changed.some(c => c.stock)) return toast(text);
+    toast(text, { label: 'Bấm nhầm? Hoàn tác', fn: () => {
+      const back = []; changed.forEach(c => { if (c.i.status === c.to) changeStatus(c.i, c.from, back); });
+      if (back.length) { save(back); render(); toast('Đã hoàn tác'); }
+    } });
+  }
 }
 function groupButtons(g) {
   const n = g.items.filter(i => i.status === 'moi').length, b = [];
   const add = (act, t, c = '') => b.push(`<button class="btn sm ${c}" data-a="g:${act}" data-g="${g.id}">${t}</button>`);
-  if (can('kho') && has(g, 'moi')) { add('close', n > 1 ? `Đã đóng cả kiện (${n})` : 'Đã đóng', 'ok'); add('unavail', 'Không có hàng', 'bad'); }
+  if (can('kho') && has(g, 'moi')) { add('close', n > 1 ? `Đã đóng cả kiện (${n})` : 'Đã đóng', 'ok'); add('unavail', 'Hết hàng', 'bad'); }
   if (can('kho', 'shop') && has(g, 'da_dong')) add('deliver', 'Đã giao', 'ok');
   if (can('kho') && has(g, 'da_dong', 'da_giao')) add('undo', 'Hoàn tác');
   if (can('shop') && has(g, 'khong_co', 'huy')) add('reopen', 'Mở lại');
@@ -203,8 +225,14 @@ function render() {
   if (!role) return;
   buildGroups();
   if (tab === 'close' && role !== 'chu') tab = 'orders';
-  $('#tabs').innerHTML = TABS.filter(([k]) => k !== 'close' || role === 'chu').map(([k, t]) => {
-    const n = k === 'pack' ? S.groups.filter(g => has(g, 'moi')).length : 0;
+  if (EASY() && tab === 'dash') tab = 'pack';
+  const npack = S.groups.filter(g => has(g, 'moi')).length;
+  if (EASY()) {
+    // Kho: 3 nút lớn có hình, "Cần đóng" đứng đầu
+    $('#tabs').innerHTML = [['pack', '📦', 'Cần đóng'], ['orders', '📋', 'Đơn hàng'], ['stock', '🏬', 'Tồn kho']].map(([k, ic, t]) =>
+      `<button class="${tab === k ? 'on' : ''}" data-tab="${k}"><span class="ti">${ic}</span><span>${t}</span>${k === 'pack' && npack ? `<i class="cnt">${npack}</i>` : ''}</button>`).join('');
+  } else $('#tabs').innerHTML = TABS.filter(([k]) => k !== 'close' || role === 'chu').map(([k, t]) => {
+    const n = k === 'pack' ? npack : 0;
     return `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}${n ? ` (${n})` : ''}</button>`;
   }).join('');
   ({ orders: vOrders, pack: vPack, stock: vStock, dash: vDash, close: vClose }[tab] || vOrders)();
@@ -229,7 +257,7 @@ function ordRow(g) {
     <div class="o-items">${g.items.map(i => `<div class="ln${i.status === 'huy' ? ' cancelled' : ''}">${esc(lineText(i))} ${itemTags(i)}${g.items.length > 1 && i.status !== g.status && i.status !== 'huy' ? ` <span class="mut">(${ST[i.status]})</span>` : ''}${i.status === 'huy' && g.items.length > 1 ? ' <span class="mut">(đã hủy)</span>' : ''}${i.note ? `<div class="mut note-ln">📝 ${esc(i.note)}</div>` : ''}</div>`).join('')}
       ${kemText(g) && g.active.length > 1 ? `<div class="mut">Kèm cả đơn: ${esc(kemText(g))}</div>` : ''}</div>
     <div class="o-st">${badge(g.status)}${miss && g.status === 'khong_co' && g.active.length > 1 ? `<div class="mut">${miss}/${g.active.length} đôi hết hàng</div>` : ''}${hn && g.status !== 'hoan' ? `<div class="mut">${hn} đôi đã hoàn</div>` : ''}</div>
-    <div class="o-acts">${groupButtons(g)}<button class="btn sm ic" data-a="cm" data-g="${g.id}" title="Trao đổi">💬${nc ? ' ' + nc : ''}</button>${canEdit ? `<button class="btn sm ic" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</div></div>`;
+    <div class="o-acts">${groupButtons(g)}<button class="btn sm ic" data-a="cm" data-g="${g.id}" title="Trao đổi">💬${EASY() ? ' Nhắn tin' : ''}${nc ? ' ' + nc : ''}</button>${canEdit ? `<button class="btn sm ic" data-a="edit" data-g="${g.id}" title="Sửa đơn">✎</button>` : ''}</div></div>`;
 }
 function vOrders() {
   const dates = [...new Set(S.groups.map(g => g.date))].sort().reverse();
@@ -445,8 +473,32 @@ function commentModal(gid) {
 }
 
 /* ===== Cần đóng (màn hình của Kho, theo kiện) ===== */
-function vPack() {
+// Một đôi, viết rõ từng phần: tên to, Size / Màu tách riêng
+const easyLine = i => `<div class="pname">${esc(i.product)}</div><div class="pdet">Size <b>${esc(i.size)}</b> · Màu <b>${esc(cap(i.color))}</b></div>
+  ${i.kem ? `<div class="pkem">➕ Kèm: <b>${esc(i.kem)}</b></div>` : ''}${i.fromStock ? '<div class="pstock">Lấy từ hàng tồn</div>' : ''}${i.note ? `<div class="pnote">📝 ${esc(i.note)}</div>` : ''}`;
+function vPackEasy() {
   const gs = S.groups.filter(g => has(g, 'moi')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const lines = gs.flatMap(g => g.items.filter(i => i.status === 'moi'));
+  const pick = {}; lines.forEach(i => pick[key(i)] = (pick[key(i)] || 0) + 1);
+  if (!gs.length) { $('#main').innerHTML = '<div class="done-all">🎉<b>Đã đóng hết đơn!</b><span>Có đơn mới app sẽ tự hiện ở đây.</span></div>'; return; }
+  $('#main').innerHTML = `<div class="ehead">Còn <b>${gs.length}</b> đơn cần đóng · <b>${lines.length}</b> đôi</div>
+  <details class="card pick"><summary>📋 Xem danh sách lấy hàng <span class="mut">(${Object.keys(pick).length} mẫu)</span></summary>
+    <div class="picklist">${Object.entries(pick).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<div><span>${esc(p)} · Size <b>${esc(s)}</b> · ${esc(cap(c))}</span><b class="x">× ${n}</b></div>`; }).join('')}</div></details>
+  ${gs.map(g => {
+    const todo = g.items.filter(i => i.status === 'moi' || i.status === 'khong_co'), multi = g.active.length > 1;
+    const n = g.items.filter(i => i.status === 'moi').length;
+    return `<div class="card ecard"><div class="ecode"><span class="mut">Mã đơn</span>${g.code ? `<b>${esc(fmtCode(g.code))}</b>` : '<b class="nocode">(chưa có mã)</b>'}<span class="mut">Ngày ${fmtD(g.date)}${multi ? ` · <b class="many">${g.active.length} đôi</b>` : ''}</span></div>
+      ${todo.map(i => `<div class="ln eln${i.status === 'khong_co' ? ' out' : ''}${TICKS.has(i.id) ? ' done' : ''}">
+        ${multi && i.status === 'moi' ? `<label class="etick"><input type="checkbox" data-tick="${i.id}" ${TICKS.has(i.id) ? 'checked' : ''} aria-label="Đã lấy đôi này"></label>` : ''}
+        <div class="einfo">${easyLine(i)}${i.status === 'khong_co' ? '<div class="pout">Đã báo hết hàng</div>' : ''}</div>
+        ${multi ? (i.status === 'moi' ? `<button class="btn bad" data-a="line:khong_co" data-id="${i.id}">Hết hàng</button>` : `<button class="btn" data-a="line:moi" data-id="${i.id}">Có hàng lại</button>`) : ''}</div>`).join('')}
+      ${n ? `<button class="btn big ok" data-a="g:close" data-g="${g.id}">✓ Đã đóng xong${n > 1 ? ` (${n} đôi)` : ''}</button>` : ''}
+      <div class="esub">${!multi && n ? `<button class="btn bad" data-a="g:unavail" data-g="${g.id}">✗ Hết hàng</button>` : ''}<button class="btn" data-a="cm" data-g="${g.id}">💬 Nhắn tin</button></div></div>`;
+  }).join('')}`;
+}
+function vPack() {
+  if (EASY()) return vPackEasy();
+  const gs =S.groups.filter(g => has(g, 'moi')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   const lines = gs.flatMap(g => g.items.filter(i => i.status === 'moi'));
   const pick = {}; lines.forEach(i => pick[key(i)] = (pick[key(i)] || 0) + 1);
   const kem = lines.reduce((m, i) => (i.kem && (m[i.kem] = (m[i.kem] || 0) + 1), m), {});
@@ -487,11 +539,16 @@ function vStock() {
   const lc = lastCheck(), thisMonth = lc && new Date(lc.ts).toLocaleDateString('sv').slice(0, 7) === today().slice(0, 7);
   const remind = can('kho') && !thisMonth && new Date().getDate() >= 25;
   const lastBatch = lc ? (S.checks || []).filter(c => Math.abs(c.ts - lc.ts) < 5000 && c.p !== '(Chốt kiểm kho)' && +c.diff !== 0) : [];
-  $('#main').innerHTML = `${remind ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
-  <div class="bar">
+  $('#main').innerHTML = `${remind && !EASY() ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
+  ${EASY() ? `<div class="bigacts">
+    <button class="bigbtn" data-a="return-open"><span class="bi">↩</span><span><b>Trả hàng về</b><small>Khách trả hàng: nhập mã đơn</small></span></button>
+    <button class="bigbtn" data-a="new-goods"><span class="bi">＋</span><span><b>Nhập hàng mới</b><small>Hàng mới về kho</small></span></button>
+    <button class="bigbtn" data-a="check-open"><span class="bi">☑</span><span><b>Kiểm kho</b>${remind ? '<small class="wn">⚠ Tháng này chưa kiểm – nhớ kiểm nhé</small>' : '<small>Đếm lại hàng cuối tháng</small>'}</span></button></div>
+  <div class="ehead">Trong kho đang có <b>${av.length}</b> đôi</div>
+  <div class="bar"><input data-f="stockQ" class="grow" placeholder="🔍 Tìm mẫu, màu, mã đơn…" value="${esc(F.stockQ)}"></div>` : `<div class="bar">
     <input data-f="stockQ" class="grow" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}">
     ${can('kho') ? '<button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button>' : ''}
-    ${can('kho') ? '<details class="more"><summary class="btn ic" aria-label="Thêm tuỳ chọn">⋯</summary><div class="menu"><button data-a="check-open">☑ Kiểm kho</button></div></details>' : ''}</div>
+    ${can('kho') ? '<details class="more"><summary class="btn ic" aria-label="Thêm tuỳ chọn">⋯</summary><div class="menu"><button data-a="check-open">☑ Kiểm kho</button></div></details>' : ''}</div>`}
   <div class="chips">${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
   <details class="card" id="stock-info" ${(F.stockInfoOpen ?? innerWidth > 640) ? 'open' : ''}><summary><b>Tồn hiện có theo mẫu</b> <span class="mut">(${Object.keys(piv).length} mẫu · ${av.length} đôi)</span></summary><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
     ${Object.entries(piv).sort().map(([k, c]) => { const [p, sz, cl] = k.split('|'); return `<span class="tag stock">${esc(p)} · ${esc(sz)} · ${esc(cap(cl))} × ${c}</span>`; }).join('') || '<span class="mut">Kho trống</span>'}</div>
@@ -546,7 +603,7 @@ const retEligible = o => o.status === 'da_giao' || o.status === 'da_dong';
 function returnModal() {
   RET = { items: [], missing: [] };
   modal(`<h3>Trả hàng về</h3>
-  <p class="mut">Nhập hoặc quét <b>mã đơn hàng trả về</b> rồi nhấn Enter. Có thể dán nhiều mã (mỗi mã một dòng). App tự điền mẫu, size, màu từ đơn.</p>
+  ${EASY() ? '<p>Gõ <b>mã đơn</b> khách trả rồi bấm <b>Thêm mã</b>. App tự hiện mẫu, size, màu.</p>' : '<p class="mut">Nhập hoặc quét <b>mã đơn hàng trả về</b> rồi nhấn Enter. Có thể dán nhiều mã (mỗi mã một dòng). App tự điền mẫu, size, màu từ đơn.</p>'}
   <textarea id="rt-code" rows="2" inputmode="numeric" placeholder="Mã đơn hoàn…"></textarea>
   <div class="row" style="justify-content:flex-start;margin:6px 0"><button class="btn sm" data-a="rt-add">Thêm mã</button><button class="btn sm" data-a="rt-manual">Không có mã đơn? Nhập tay</button></div>
   <div id="rt-list"></div>
@@ -880,7 +937,7 @@ document.addEventListener('input', e => {
 document.addEventListener('toggle', e => { if (e.target.id === 'stock-info') F.stockInfoOpen = e.target.open; }, true);
 document.addEventListener('change', e => {
   const t = e.target.dataset && e.target.dataset.tick;
-  if (t) { e.target.checked ? TICKS.add(t) : TICKS.delete(t); }
+  if (t) { e.target.checked ? TICKS.add(t) : TICKS.delete(t); const ln = e.target.closest('.ln'); if (ln) ln.classList.toggle('done', e.target.checked); }
 });
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 let pinging = false, ticks = 0;
