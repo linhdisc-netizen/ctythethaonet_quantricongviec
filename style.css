@@ -358,3 +358,18 @@ body.easy .chip[data-st=da_dong].on{background:var(--ok);color:#fff}
   .mbox .row .btn{white-space:nowrap;font-size:15px}
 }
 .aline.v2 .srcrow{flex-wrap:wrap;gap:6px 14px}.aline.v2 .srcrow>*{white-space:nowrap}
+
+/* ---- Hàng Shop gửi về: chờ Kho kiểm duyệt ---- */
+.pendbox{background:var(--warnbg);border:2px solid var(--warn);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+.pendbox .ph{font-size:17px;font-weight:600;color:var(--warn)}
+.pendbox .ph b{font-size:20px}
+.pend-row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 0;border-top:1px solid rgba(180,83,9,.25)}
+.pend-row .pinfo{flex:1 1 220px;min-width:0}
+.pend-row .pacts{display:flex;gap:6px;flex-wrap:wrap}
+.pend-row .btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.pendbox .btn.big{margin-top:10px}
+.pendhint{display:block;width:100%;text-align:left;background:var(--warnbg);color:var(--warn);border:2px solid var(--warn);border-radius:14px;padding:12px 14px;margin-bottom:12px;font:inherit;font-size:17px;cursor:pointer}
+body.easy nav .cnt.warnc{background:var(--warn)}
+body.easy .pendbox .ph{font-size:20px}
+body.easy .pend-row .pinfo{font-size:19px}
+@media(max-width:640px){.pend-row .pacts{width:100%}.pend-row .pacts .btn{flex:1 1 auto}}

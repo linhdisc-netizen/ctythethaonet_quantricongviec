@@ -211,7 +211,7 @@ function readTabN(name, header, max) {
 // Hai việc này tự bổ sung một lần (có đánh dấu để không lặp lại); lỗi thì bỏ qua, không ảnh hưởng chạy.
 function ensureSetup(o) {
   const PROPS = PropertiesService.getScriptProperties();
-  if (PROPS.getProperty('setup_v4')) return;                  // đã cài đặt rồi thì bỏ qua
+  if (PROPS.getProperty('setup_v5')) return;                  // đã cài đặt rồi thì bỏ qua
   try {
     const cat = book().getSheetByName(TAB.CAT);
     if (cat && o.h[ORD.st] && String(cat.getRange('E6').getValue()).trim() === '') {
@@ -251,7 +251,21 @@ function ensureSetup(o) {
       props.setProperty('setupV3', '1');
     }
   } catch (err) { /* bỏ qua */ }
-  try { PROPS.setProperty('setup_v4', '1'); } catch (err) { /* bỏ qua */ }
+  try {
+    // Bản 5: hàng Shop gửi về phải chờ Kho kiểm duyệt
+    const cat = book().getSheetByName(TAB.CAT);
+    if (cat && !PROPS.getProperty('setupV5')) {
+      const put = (a1, v) => { const c = cat.getRange(a1); if (String(c.getValue()).trim() === '') c.setValue(v); };
+      put('H6', 'Chờ duyệt'); put('H7', 'Từ chối');
+      const st = book().getSheetByName(TAB.STK);
+      if (st) {
+        const si = st.getRange(1, 1, 1, Math.max(st.getLastColumn(), 1)).getValues()[0].indexOf(STK.st);
+        if (si >= 0) st.getRange(2, si + 1, 3000, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['Còn hàng', 'Đã dùng', 'Lỗi', 'Thất thoát', 'Chờ duyệt', 'Từ chối'], true).setAllowInvalid(false).build());
+      }
+      PROPS.setProperty('setupV5', '1');
+    }
+  } catch (err) { /* bỏ qua */ }
+  try { PROPS.setProperty('setup_v5', '1'); } catch (err) { /* bỏ qua */ }
 }
 function load(role) {
   const rev = getRev(), ck = 'L5:' + role + ':' + rev;
@@ -288,6 +302,7 @@ function appendRows(t, rowsByHeader, textCols) {
 }
 
 function write(p, role) {
+  const pendingReturn = orderId => { for (let r = 1; r < s.vals.length; r++) if (String(cellOf(s, r, STK.st)) === 'Chờ duyệt' && String(cellOf(s, r, STK.note)).indexOf('Hoàn từ đơn ' + orderId + ' ') === 0) return true; return false; };
   const ops = p.ops || [];
   const o = table(TAB.ORD, ORD), s = table(TAB.STK, STK);
   const oIdx = indexById(o), sIdx = indexById(s);
@@ -401,28 +416,38 @@ function write(p, role) {
         return results.push({ ok: true });
       }
       if (op.t === 'stock.addGrid') {
-        if (role === 'shop') return results.push(fail('Shop không được nhập kho'));
+        const pend = role === 'shop';                    // Shop gửi → chờ Kho kiểm rồi mới vào kho
         const rows = [], ids = [];
         (op.items || []).forEach(it => {
           const k = Math.min(Math.max(+it.n || 0, 0), 100);
           for (let i = 0; i < k && ids.length < 300; i++) {
             const id = newStockId(); ids.push(id);
             const row = {}; row[STK.id] = id; row[STK.date] = toDate(op.date) || toDate(todayStr()); row[STK.type] = 'Nhập mới';
-            row[STK.product] = op.product; row[STK.size] = +it.size || it.size; row[STK.color] = op.color; row[STK.ref] = ''; row[STK.st] = 'Còn hàng'; row[STK.note] = op.note || '';
+            row[STK.product] = op.product; row[STK.size] = +it.size || it.size; row[STK.color] = op.color; row[STK.ref] = ''; row[STK.st] = pend ? 'Chờ duyệt' : 'Còn hàng'; row[STK.note] = (pend ? 'Shop gửi' + (op.note ? ': ' : '') : '') + (op.note || '');
             rows.push(row);
           }
         });
         if (!rows.length) return results.push(fail('Chưa nhập số lượng nào'));
         appendRows(s, rows, [STK.ref]); ids.forEach((id, i) => { sIdx[id] = s.vals.length - ids.length + i; });
-        log(ids[0], 'Nhập hàng mới ' + ids.length + ' đôi ' + op.product + ' ' + op.color + (op.note ? ' (' + op.note + ')' : ''));
-        return results.push({ ok: true, count: ids.length });
+        log(ids[0], (pend ? 'Shop gửi nhập hàng mới (chờ Kho duyệt) ' : 'Nhập hàng mới ') + ids.length + ' đôi ' + op.product + ' ' + op.color + (op.note ? ' (' + op.note + ')' : ''));
+        return results.push({ ok: true, count: ids.length, pending: pend });
       }
       if (op.t === 'return.add') {
-        if (role === 'shop') return results.push(fail('Shop không được nhập hàng hoàn'));
         const r = oIdx[op.orderId];
         if (!r) return results.push(fail('Không thấy đơn ' + op.orderId));
         const cur = String(cellOf(o, r, ORD.st));
         if (cur !== 'Đã giao' && cur !== 'Đã đóng') return results.push(fail('Đơn này đang ở trạng thái "' + cur + '", chưa thể nhập hàng hoàn'));
+        if (pendingReturn(op.orderId)) return results.push(fail('Đôi này đã báo trả về, đang chờ Kho kiểm'));
+        if (role === 'shop') {
+          const id = newStockId();
+          const row = {}; row[STK.id] = id; row[STK.date] = toDate(todayStr()); row[STK.type] = 'Hàng hoàn';
+          row[STK.product] = cellOf(o, r, ORD.product); row[STK.size] = cellOf(o, r, ORD.size); row[STK.color] = cellOf(o, r, ORD.color);
+          row[STK.ref] = String(cellOf(o, r, ORD.code) || ''); row[STK.st] = 'Chờ duyệt';
+          row[STK.note] = 'Hoàn từ đơn ' + op.orderId + ' (Shop báo)';
+          appendRows(s, [row], [STK.ref]); sIdx[id] = s.vals.length - 1;
+          log(id, 'Shop báo hàng hoàn từ đơn ' + op.orderId + ' (chờ Kho duyệt)');
+          return results.push({ ok: true, id: id, pending: true });
+        }
         const bad = op.cond === 'loi';
         setCell(o, r, ORD.st, 'Đã hoàn'); touch(r);
         const id = newStockId();
@@ -433,6 +458,25 @@ function write(p, role) {
         appendRows(s, [row], [STK.ref]); sIdx[id] = s.vals.length - 1;
         log(op.orderId, cur + ' → Đã hoàn'); log(id, 'Nhập hàng hoàn từ đơn ' + op.orderId + (bad ? ' (lỗi)' : ''));
         return results.push({ ok: true, id: id });
+      }
+      if (op.t === 'stock.review') {
+        if (role === 'shop') return results.push(fail('Chỉ Kho mới duyệt hàng vào kho'));
+        const sr = sIdx[op.id];
+        if (!sr) return results.push(fail('Không thấy dòng tồn ' + op.id));
+        if (String(cellOf(s, sr, STK.st)) !== 'Chờ duyệt') return results.push({ ok: false, conflict: true });
+        const act = op.act === 'loi' ? 'loi' : op.act === 'reject' ? 'reject' : 'ok';
+        const m = /Hoàn từ đơn (D\d+)/.exec(String(cellOf(s, sr, STK.note)));
+        if (m && act !== 'reject') {
+          const r2 = oIdx[m[1]], cur2 = r2 ? String(cellOf(o, r2, ORD.st)) : '';
+          if (cur2 !== 'Đã giao' && cur2 !== 'Đã đóng') return results.push(fail('Đơn ' + m[1] + ' đang "' + (cur2 || 'không thấy') + '", không nhận hoàn được. Bấm "Không nhận".'));
+          setCell(o, r2, ORD.st, 'Đã hoàn'); touch(r2); log(m[1], cur2 + ' → Đã hoàn (Kho duyệt hàng hoàn)');
+        }
+        const note = String(cellOf(s, sr, STK.note));
+        setCell(s, sr, STK.st, act === 'ok' ? 'Còn hàng' : act === 'loi' ? 'Lỗi' : 'Từ chối');
+        setCell(s, sr, STK.note, note + ' | ' + ROLE_NAME[role] + (act === 'ok' ? ' đã duyệt' : act === 'loi' ? ' duyệt: hàng lỗi' : ' không nhận') + (op.reason ? ': ' + op.reason : ''));
+        if (act !== 'reject') setCell(s, sr, STK.date, toDate(todayStr()));
+        log(op.id, act === 'ok' ? 'Kho duyệt vào kho' : act === 'loi' ? 'Kho duyệt: hàng lỗi' : 'Kho không nhận' + (op.reason ? ' (' + op.reason + ')' : ''));
+        return results.push({ ok: true });
       }
       if (op.t === 'return.undo') {
         if (role === 'shop') return results.push(fail('Shop không được hoàn tác nhập hoàn'));

@@ -56,7 +56,7 @@ const mapOrders = arr => (arr || []).map(o => ({
   })).filter(o => o.product);
 const mapStock = arr => (arr || []).map(x => ({
     id: x.id, date: String(x.date).slice(0, 10), type: x.type === 'Hàng lấy dư' ? 'du' : x.type === 'Nhập mới' ? 'moi' : 'hoan', product: x.product, size: String(x.size), color: normColor(x.color),
-    ref: String(x.ref || ''), state: x.st === 'Đã dùng' ? 'used' : x.st === 'Lỗi' ? 'loi' : x.st === 'Thất thoát' ? 'mat' : 'con', used: x.st === 'Đã dùng',
+    ref: String(x.ref || ''), state: x.st === 'Đã dùng' ? 'used' : x.st === 'Lỗi' ? 'loi' : x.st === 'Thất thoát' ? 'mat' : x.st === 'Chờ duyệt' ? 'cho' : x.st === 'Từ chối' ? 'tuchoi' : 'con', used: x.st === 'Đã dùng',
     usedDate: String(x.used || '').slice(0, 10), usedBy: String(x.forOrder || ''), note: String(x.note || '').trim(),
   })).filter(x => x.product);
 // Dữ liệu lần tải gần nhất được giữ trên máy để lần sau mở app hiện ngay (xoá khi đăng xuất)
@@ -229,11 +229,12 @@ function render() {
   const npack = S.groups.filter(g => has(g, 'moi')).length;
   if (EASY()) {
     // Kho: 3 nút lớn có hình, "Cần đóng" đứng đầu
+    const npend = pendingStock().length;
     $('#tabs').innerHTML = [['pack', '📦', 'Cần đóng'], ['orders', '📋', 'Đơn hàng'], ['stock', '🏬', 'Tồn kho']].map(([k, ic, t]) =>
-      `<button class="${tab === k ? 'on' : ''}" data-tab="${k}"><span class="ti">${ic}</span><span>${t}</span>${k === 'pack' && npack ? `<i class="cnt">${npack}</i>` : ''}</button>`).join('');
+      `<button class="${tab === k ? 'on' : ''}" data-tab="${k}"><span class="ti">${ic}</span><span>${t}</span>${k === 'pack' && npack ? `<i class="cnt">${npack}</i>` : k === 'stock' && npend ? `<i class="cnt warnc">${npend}</i>` : ''}</button>`).join('');
   } else $('#tabs').innerHTML = TABS.filter(([k]) => k !== 'close' || role === 'chu').map(([k, t]) => {
-    const n = k === 'pack' ? npack : 0;
-    return `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}${n ? ` (${n})` : ''}</button>`;
+    const n = k === 'pack' ? npack : k === 'stock' ? pendingStock().length : 0;
+    return `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t}${n ? ` (${k === 'stock' ? '⏳' : ''}${n})` : ''}</button>`;
   }).join('');
   ({ orders: vOrders, pack: vPack, stock: vStock, dash: vDash, close: vClose }[tab] || vOrders)();
 }
@@ -488,6 +489,7 @@ function commentModal(gid) {
 // Một đôi, viết rõ từng phần: tên to, Size / Màu tách riêng
 const easyLine = i => `<div class="pname">${esc(i.product)}</div><div class="pdet">Size <b>${esc(i.size)}</b> · Màu <b>${esc(cap(i.color))}</b></div>
   ${i.kem ? `<div class="pkem">➕ Kèm: <b>${esc(i.kem)}</b></div>` : ''}${i.fromStock ? '<div class="pstock">Lấy từ hàng tồn</div>' : ''}${i.note ? `<div class="pnote">📝 ${esc(i.note)}</div>` : ''}`;
+const pendHint = () => { const k = pendingStock().length; return k ? `<button class="pendhint" data-tab="stock">📥 Shop gửi về <b>${k}</b> đôi, chờ chị kiểm → <u>Xem</u></button>` : ''; };
 function vPackEasy() {
   const gs = S.groups.filter(g => has(g, 'moi')).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   const lines = gs.flatMap(g => g.items.filter(i => i.status === 'moi'));
@@ -497,8 +499,8 @@ function vPackEasy() {
   const doneN = doneG.reduce((n, g) => n + g.items.filter(i => i.status === 'da_dong').length, 0);
   const doneHtml = doneG.length ? `<div class="donesec"><div class="dh">✅ Đã đóng hôm nay: <b>${doneG.length}</b> đơn · <b>${doneN}</b> đôi</div>
     ${doneG.map(g => `<div class="drow"><span class="dk">✓</span><div class="dinfo"><b>${g.code ? esc(fmtCode(g.code)) : '(chưa có mã)'}</b><span>${g.items.filter(i => i.status === 'da_dong').map(i => esc(`${i.product} · Size ${i.size} · ${cap(i.color)}`)).join('<br>')}</span></div><button class="btn" data-a="g:undo" data-g="${g.id}">Hoàn tác</button></div>`).join('')}</div>` : '';
-  if (!gs.length) { $('#main').innerHTML = '<div class="done-all">🎉<b>Đã đóng hết đơn!</b><span>Có đơn mới app sẽ tự hiện ở đây.</span></div>' + doneHtml; return; }
-  $('#main').innerHTML = `<div class="ehead">Còn <b>${gs.length}</b> đơn cần đóng · <b>${lines.length}</b> đôi</div>
+  if (!gs.length) { $('#main').innerHTML = pendHint() + '<div class="done-all">🎉<b>Đã đóng hết đơn!</b><span>Có đơn mới app sẽ tự hiện ở đây.</span></div>' + doneHtml; return; }
+  $('#main').innerHTML = `${pendHint()}<div class="ehead">Còn <b>${gs.length}</b> đơn cần đóng · <b>${lines.length}</b> đôi</div>
   <details class="card pick"><summary>📋 Xem danh sách lấy hàng <span class="mut">(${Object.keys(pick).length} mẫu)</span></summary>
     <div class="picklist">${Object.entries(pick).sort().map(([k, n]) => { const [p, s, c] = k.split('|'); return `<div><span>${esc(p)} · Size <b>${esc(s)}</b> · ${esc(cap(c))}</span><b class="x">× ${n}</b></div>`; }).join('')}</div></details>
   ${gs.map(g => {
@@ -543,20 +545,36 @@ function stockBadge(s) {
   if (s.state === 'used') { const o = s.usedBy && S.orders.find(x => x.id === s.usedBy); return `<span class="badge b-da_dong">Đã dùng ${fmtD(s.usedDate)}${o ? ' · ' + esc(o.code || 'đơn mới') : ''}</span>`; }
   if (s.state === 'loi') return '<span class="badge b-khong_co">Lỗi</span>';
   if (s.state === 'mat') return '<span class="badge b-huy">Thất thoát</span>';
+  if (s.state === 'cho') return '<span class="badge b-moi">⏳ Chờ Kho duyệt</span>';
+  if (s.state === 'tuchoi') return '<span class="badge b-huy">Kho không nhận</span>';
   return '<span class="badge b-da_giao">Còn hàng</span>';
 }
+const pendingStock = () => S.stock.filter(s => s.state === 'cho');
+const pendingRet = id => S.stock.some(s => s.state === 'cho' && s.note.indexOf('Hoàn từ đơn ' + id + ' ') === 0);
 const lastCheck = () => (S.checks || []).filter(c => c.p === '(Chốt kiểm kho)').sort((a, b) => b.ts - a.ts)[0] || null;
+function pendingBox() {
+  const P = pendingStock().sort((a, b) => a.id.localeCompare(b.id));
+  if (!P.length) return '';
+  const rev = can('kho');
+  const line = x => { const m = /Hoàn từ đơn (D\d+)/.exec(x.note), o = m && S.orders.find(y => y.id === m[1]);
+    return `<div class="pend-row"><div class="pinfo"><b>${esc(x.product)}</b> · Size <b>${esc(x.size)}</b> · ${esc(cap(x.color))}
+      <div class="mut">${x.type === 'hoan' ? '↩ Khách trả về' + (o && o.code ? ' · đơn ' + esc(EASY() ? fmtCode(o.code) : o.code) : '') : '＋ Hàng mới về'}${!m && x.note.replace(/^Shop gửi:? ?/, '') ? ' · ' + esc(x.note.replace(/^Shop gửi:? ?/, '')) : ''}</div></div>
+      ${rev ? `<div class="pacts"><button class="btn ok" data-a="rv:ok" data-id="${x.id}">✓ Đủ – vào kho</button><button class="btn" data-a="rv:loi" data-id="${x.id}">Hàng lỗi</button><button class="btn bad" data-a="rv:reject" data-id="${x.id}">✗ Không nhận</button></div>` : ''}</div>`; };
+  return `<div class="pendbox"><div class="ph">${rev ? `📥 Shop gửi về, chờ Kho kiểm: <b>${P.length}</b> đôi` : `⏳ Đang chờ Kho kiểm: <b>${P.length}</b> đôi`}</div>
+    <div class="mut" style="margin:2px 0 6px">${rev ? 'Kiểm hàng thật rồi bấm: <b>Đủ – vào kho</b>, <b>Hàng lỗi</b> hoặc <b>Không nhận</b>.' : 'Kho kiểm xong hàng mới được cộng vào tồn.'}</div>
+    ${P.map(line).join('')}${rev && P.length > 1 ? `<button class="btn big ok" data-a="rv:all">✓ Đủ hết – đưa tất cả ${P.length} đôi vào kho</button>` : ''}</div>`;
+}
 function vStock() {
   const av = availStock(), q = F.stockQ.toLowerCase(), view = F.stockView;
   const piv = {}; av.forEach(s => piv[key(s)] = (piv[key(s)] || 0) + 1);
   const n = st => S.stock.filter(s => s.state === st).length;
-  const rows = S.stock.filter(s => (view === 'all' || (view === 'con' && s.state === 'con') || (view === 'used' && s.state === 'used') || (view === 'khac' && (s.state === 'loi' || s.state === 'mat')))
+  const rows = S.stock.filter(s => s.state !== 'cho' && (view === 'all' || (view === 'con' && s.state === 'con') || (view === 'used' && s.state === 'used') || (view === 'khac' && (s.state === 'loi' || s.state === 'mat')) || (view === 'tuchoi' && s.state === 'tuchoi'))
     && (!q || lineText(s).toLowerCase().includes(q) || (s.ref || '').includes(q) || (s.note || '').toLowerCase().includes(q)))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
   const lc = lastCheck(), thisMonth = lc && new Date(lc.ts).toLocaleDateString('sv').slice(0, 7) === today().slice(0, 7);
   const remind = can('kho') && !thisMonth && new Date().getDate() >= 25;
   const lastBatch = lc ? (S.checks || []).filter(c => Math.abs(c.ts - lc.ts) < 5000 && c.p !== '(Chốt kiểm kho)' && +c.diff !== 0) : [];
-  $('#main').innerHTML = `${remind && !EASY() ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
+  $('#main').innerHTML = `${pendingBox()}${remind && !EASY() ? '<div class="warn">📋 Sắp hết tháng mà chưa kiểm kho tháng này. <button class="btn sm" data-a="check-open">Kiểm kho ngay</button></div>' : ''}
   ${EASY() ? `<div class="bigacts">
     <button class="bigbtn" data-a="return-open"><span class="bi">↩</span><span><b>Trả hàng về</b><small>Khách trả hàng: nhập mã đơn</small></span></button>
     <button class="bigbtn" data-a="new-goods"><span class="bi">＋</span><span><b>Nhập hàng mới</b><small>Hàng mới về kho</small></span></button>
@@ -564,9 +582,9 @@ function vStock() {
   <div class="ehead">Trong kho đang có <b>${av.length}</b> đôi</div>
   <div class="bar"><input data-f="stockQ" class="grow" placeholder="🔍 Tìm mẫu, màu, mã đơn…" value="${esc(F.stockQ)}"></div>` : `<div class="bar">
     <input data-f="stockQ" class="grow" placeholder="Tìm mẫu, màu, mã hoàn…" value="${esc(F.stockQ)}">
-    ${can('kho') ? '<button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button>' : ''}
+    ${can('kho', 'shop') ? '<button class="btn pri" data-a="return-open">↩ Trả hàng về</button><button class="btn pri" data-a="new-goods">+ Nhập hàng mới</button>' : ''}
     ${can('kho') ? '<details class="more"><summary class="btn ic" aria-label="Thêm tuỳ chọn">⋯</summary><div class="menu"><button data-a="check-open">☑ Kiểm kho</button></div></details>' : ''}</div>`}
-  <div class="chips">${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
+  <div class="chips">${[['con', 'Còn hàng ' + av.length], ['used', 'Đã dùng lại ' + n('used')], ['khac', 'Lỗi / thất thoát ' + (n('loi') + n('mat'))], ...(n('tuchoi') ? [['tuchoi', 'Kho không nhận ' + n('tuchoi')]] : []), ['all', 'Tất cả']].map(([k, t]) => `<span class="chip ${view === k ? 'on' : ''}" data-sv="${k}">${t}</span>`).join('')}</div>
   <details class="card" id="stock-info" ${(F.stockInfoOpen ?? innerWidth > 640) ? 'open' : ''}><summary><b>Tồn hiện có theo mẫu</b> <span class="mut">(${Object.keys(piv).length} mẫu · ${av.length} đôi)</span></summary><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
     ${Object.entries(piv).sort().map(([k, c]) => { const [p, sz, cl] = k.split('|'); return `<span class="tag stock">${esc(p)} · ${esc(sz)} · ${esc(cap(cl))} × ${c}</span>`; }).join('') || '<span class="mut">Kho trống</span>'}</div>
     ${lc ? `<div class="mut" style="margin-top:8px">Lần kiểm kho gần nhất: ${new Date(lc.ts).toLocaleDateString('vi-VN')} · ${esc(lc.who)} · ${esc(lc.action)}</div>` : '<div class="mut" style="margin-top:8px">Chưa có lần kiểm kho nào.</div>'}
@@ -588,10 +606,10 @@ function ngItems() {
   if (o.size && o.n > 0) it.push(o);
   return it;
 }
-function ngSum() { const t = ngItems().reduce((a, x) => a + x.n, 0); $('#ng-sum').innerHTML = `Tổng <b>${t}</b> đôi sẽ được thêm vào kho (tình trạng Còn hàng).`; }
+function ngSum() { const t = ngItems().reduce((a, x) => a + x.n, 0); $('#ng-sum').innerHTML = role === 'shop' ? `Tổng <b>${t}</b> đôi sẽ <b>gửi Kho kiểm duyệt</b>. Kho kiểm xong mới cộng vào tồn.` : `Tổng <b>${t}</b> đôi sẽ được thêm vào kho (tình trạng Còn hàng).`; }
 function newGoodsModal() {
   NG = { product: PRODUCTS[0], custom: false };
-  modal(`<h3>Nhập hàng mới</h3>
+  modal(`<h3>Nhập hàng mới</h3>${role === 'shop' ? '<div class="note">Hàng Shop nhập sẽ <b>chờ Kho kiểm</b>, Kho xác nhận xong mới vào tồn kho.</div>' : ''}
   <div class="fld"><label>Ngày</label><input type="date" id="ng-date" value="${today()}"></div>
   <div class="fld"><label>Sản phẩm</label><div id="ng-prod" class="stackf"></div></div>
   <div class="fld"><label>Màu</label><input id="ng-color" list="dl-color" placeholder="chọn hoặc gõ"></div>
@@ -601,7 +619,7 @@ function newGoodsModal() {
   <div class="sizegrid">${SIZES.map(sz => `<label class="sz"><span>${esc(sz)}</span><input type="number" min="0" max="100" data-ngs="${esc(sz)}"></label>`).join('')}
     <label class="sz wide2"><span>Size khác</span><div class="two"><input data-ngo="size" list="dl-size" placeholder="size"><input type="number" min="0" max="100" data-ngo="n" placeholder="số đôi"></div></label></div>
   <div id="ng-sum" class="sum"></div>
-  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="ng-save">Lưu vào kho</button></div>`);
+  <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="ng-save">${role === 'shop' ? 'Gửi Kho kiểm duyệt' : 'Lưu vào kho'}</button></div>`);
   ngProdDraw(); ngSum();
 }
 function ngSave() {
@@ -611,18 +629,18 @@ function ngSave() {
   if (!items.length) return toast('Nhập số đôi ở ít nhất một size');
   const total = items.reduce((a, x) => a + x.n, 0);
   save([{ t: 'stock.addGrid', date: $('#ng-date').value || today(), product: prod, color: cap(color), note: $('#ng-note').value.trim(), items }]);
-  closeModal(); toast(`Đang nhập ${total} đôi vào kho…`);
+  closeModal(); toast(role === 'shop' ? `Đã gửi ${total} đôi, chờ Kho kiểm duyệt` : `Đang nhập ${total} đôi vào kho…`);
 }
 
 /* --- Trả hàng về (nhập theo mã đơn) --- */
 let RET = null;
-const retEligible = o => o.status === 'da_giao' || o.status === 'da_dong';
+const retEligible = o => (o.status === 'da_giao' || o.status === 'da_dong') && !pendingRet(o.id);
 function returnModal() {
   RET = { items: [], missing: [] };
-  modal(`<h3>Trả hàng về</h3>
+  modal(`<h3>Trả hàng về</h3>${role === 'shop' ? '<div class="note">Shop báo hàng khách trả. <b>Kho kiểm hàng thật</b> rồi mới đưa vào kho.</div>' : ''}
   ${EASY() ? '<p>Gõ <b>mã đơn</b> khách trả rồi bấm <b>Thêm mã</b>. App tự hiện mẫu, size, màu.</p>' : '<p class="mut">Nhập hoặc quét <b>mã đơn hàng trả về</b> rồi nhấn Enter. Có thể dán nhiều mã (mỗi mã một dòng). App tự điền mẫu, size, màu từ đơn.</p>'}
   <textarea id="rt-code" rows="2" inputmode="numeric" placeholder="Mã đơn hoàn…"></textarea>
-  <div class="row" style="justify-content:flex-start;margin:6px 0"><button class="btn sm" data-a="rt-add">Thêm mã</button><button class="btn sm" data-a="rt-manual">Không có mã đơn? Nhập tay</button></div>
+  <div class="row" style="justify-content:flex-start;margin:6px 0"><button class="btn sm" data-a="rt-add">Thêm mã</button>${role === 'shop' ? '' : '<button class="btn sm" data-a="rt-manual">Không có mã đơn? Nhập tay</button>'}</div>
   <div id="rt-list"></div>
   <div class="row"><button class="btn" data-a="close">Huỷ</button><button class="btn pri" data-a="rt-save">Lưu hàng hoàn</button></div>`);
   $('#rt-code').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); rtAdd(); } });
@@ -645,15 +663,17 @@ function rtDraw() {
   $('#rt-list').innerHTML = Object.entries(groups).map(([code, xs]) => `<div class="card kien"><div class="kh"><b class="code">${esc(code)}</b><span class="sp" style="flex:1"></span><button class="btn sm" data-a="rt-del" data-code="${esc(code)}">Bỏ mã này</button></div>
     ${xs.map(x => { const o = S.orders.find(y => y.id === x.id), ok = retEligible(o);
       return `<div class="ln pk"><label><input type="checkbox" data-rt="on" data-id="${x.id}" ${x.on ? 'checked' : ''} ${ok ? '' : 'disabled'}> ${esc(lineText(o))} ${itemTags(o)}</label>
-        ${ok ? `<select data-rt="cond" data-id="${x.id}"><option value="tot" ${x.cond === 'tot' ? 'selected' : ''}>Tốt</option><option value="loi" ${x.cond === 'loi' ? 'selected' : ''}>Lỗi</option></select>` : `<span class="mut">${esc(ST[o.status])}: chưa thể nhập hoàn</span>`}</div>`; }).join('')}</div>`).join('')
-    + RET.missing.map(c => `<div class="warn">Không thấy mã <b>${esc(c)}</b> trong đơn hàng. <button class="btn sm" data-a="rt-manual" data-code="${esc(c)}">Nhập tay</button></div>`).join('');
+        ${ok && role === 'shop' ? '' : ok ? `<select data-rt="cond" data-id="${x.id}"><option value="tot" ${x.cond === 'tot' ? 'selected' : ''}>Tốt</option><option value="loi" ${x.cond === 'loi' ? 'selected' : ''}>Lỗi</option></select>` : `<span class="mut">${pendingRet(o.id) ? 'đã báo, đang chờ Kho kiểm' : esc(ST[o.status]) + ': chưa thể nhập hoàn'}</span>`}</div>`; }).join('')}</div>`).join('')
+    + RET.missing.map(c => `<div class="warn">Không thấy mã <b>${esc(c)}</b> trong đơn hàng.${role === 'shop' ? ' Kiểm tra lại mã hoặc nhắn Kho.' : ` <button class="btn sm" data-a="rt-manual" data-code="${esc(c)}">Nhập tay</button>`}</div>`).join('');
   const k = RET.items.filter(x => x.on).length, sv = document.querySelector('[data-a=rt-save]');
-  if (sv) sv.textContent = k ? `Lưu hàng hoàn (${k} đôi)` : 'Lưu hàng hoàn';
+  const lb = role === 'shop' ? 'Gửi Kho kiểm' : 'Lưu hàng hoàn';
+  if (sv) sv.textContent = k ? `${lb} (${k} đôi)` : lb;
 }
 function rtSave() {
   const sel = RET.items.filter(x => x.on);
   if (!sel.length) return toast('Chưa chọn đôi nào để nhập hoàn');
   const ops = sel.map(x => ({ t: 'return.add', orderId: x.id, cond: x.cond }));
+  if (role === 'shop') { save(ops); closeModal(); return toast(`Đã báo ${sel.length} đôi trả về, chờ Kho kiểm`); }
   sel.forEach(x => { const o = S.orders.find(y => y.id === x.id); if (o) o.status = 'hoan'; });
   save(ops); closeModal(); toast(`Đang nhập ${sel.length} đôi hàng hoàn…`);
 }
@@ -887,6 +907,17 @@ document.addEventListener('click', e => {
       save([{ t: 'return.undo', id: st.id }]); return render();
     }
     case 'stock-save': return saveStock();
+    case 'rv:ok': case 'rv:loi': case 'rv:reject': case 'rv:all': {
+      const act = a.slice(3), list = act === 'all' ? pendingStock() : [S.stock.find(x => x.id === d.id)].filter(Boolean);
+      if (!list.length) return;
+      let reason = '';
+      if (act === 'reject') { reason = prompt('Lý do không nhận (ví dụ: không thấy hàng, sai mẫu). Có thể để trống:', ''); if (reason === null) return; }
+      if (act === 'all' && !confirm(`Đưa cả ${list.length} đôi vào kho?`)) return;
+      const ops = list.map(x => ({ t: 'stock.review', id: x.id, act: act === 'all' ? 'ok' : act, reason: reason.trim() }));
+      list.forEach(x => { x.state = act === 'reject' ? 'tuchoi' : act === 'loi' ? 'loi' : 'con'; const m = act !== 'reject' && /Hoàn từ đơn (D\d+)/.exec(x.note), o = m && S.orders.find(y => y.id === m[1]); if (o) o.status = 'hoan'; });
+      save(ops); render();
+      return toast(act === 'reject' ? 'Đã ghi: Kho không nhận' : act === 'loi' ? 'Đã ghi: hàng lỗi' : `Đã đưa ${list.length} đôi vào kho`);
+    }
     case 'stock-use': { const s = S.stock.find(x => x.id === d.id); s.used = true; s.state = 'used'; s.usedDate = today(); save([{ t: 'stock.use', id: s.id }]); return render(); }
     case 'stock-free': { const s = S.stock.find(x => x.id === d.id); s.used = false; s.state = 'con'; s.usedDate = ''; s.usedBy = ''; save([{ t: 'stock.free', id: s.id }]); return render(); }
   }
